@@ -208,15 +208,24 @@ def provider_preflight(config: dict[str, Any], *, trial_confirmed: bool, availab
     load_env_file()
     judge = require_mapping(config.get("judge"), "judge")
     budget = require_mapping(config.get("budget"), "budget")
+    provider = str(judge["provider"]).lower()
+    env_var_map = {
+        "cohere": "COHERE_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "google": "GEMINI_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }
+    env_var = env_var_map.get(provider, f"{provider.upper()}_API_KEY")
     required = int(budget["required_available_calls"])
+    key_present = bool(os.environ.get(env_var)) or (provider in ("gemini", "google") and bool(os.environ.get("GOOGLE_API_KEY")))
     print(f"provider: {judge['provider']}")
     print(f"model: {judge['model']}")
-    print(f"API key present: {'yes' if bool(os.environ.get('COHERE_API_KEY')) else 'no'}")
+    print(f"API key ({env_var}) present: {'yes' if key_present else 'no'}")
     print(f"trial/evaluation mode confirmed by operator: {'yes' if trial_confirmed else 'no'}")
     print(f"monthly call budget entered by operator: {available_call_budget if available_call_budget is not None else 'not entered'}")
     print(f"planned maximum calls: {int(budget['hard_api_call_cap'])}")
-    if not os.environ.get("COHERE_API_KEY"):
-        raise RuntimeError("COHERE_API_KEY is not present")
+    if not key_present:
+        raise RuntimeError(f"{env_var} is not present")
     if not trial_confirmed:
         raise RuntimeError("operator must explicitly confirm trial/evaluation mode")
     if available_call_budget is None or available_call_budget < required:
@@ -239,7 +248,7 @@ def _increment_counter(path: Path, cap: int) -> int:
     return current
 
 
-def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_confirmed: bool, available_call_budget: int | None) -> Path:
+def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_confirmed: bool, available_call_budget: int | None, limit: int | None = None, condition_id: str | None = None) -> Path:
     config_path = Path(config_path)
     config = load_config(config_path)
     paths = require_mapping(config.get("paths"), "paths")
@@ -281,6 +290,12 @@ def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_conf
         write_json(manifest_path, {"run_id": run_id, "split": split, "created_at": utc_now(), "git_commit": git_commit(), "conditions_hash": fingerprint, "config": config, "provider": judge_config["provider"], "model": judge_config["model"]})
     conditions = list(read_jsonl(conditions_path))
     random.Random(int(config["seed"])).shuffle(conditions)
+    if condition_id:
+        conditions = [c for c in conditions if str(c.get("condition_id")) == condition_id]
+        if not conditions:
+            raise ValueError(f"condition ID {condition_id} not found in {conditions_path}")
+    if limit is not None and limit > 0:
+        conditions = conditions[:limit]
     responses_path = run_dir / "responses.jsonl"
     requests_path = run_dir / "requests.jsonl"
     completed = _existing_ids(responses_path)
@@ -321,8 +336,19 @@ def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_conf
                     time.sleep(float(retry_after) if retry_after else min(2 ** attempt, 30))
             except ProviderError as exc:
                 error_status = str(exc)
-                break
-        base = {"run_id": run_id, "condition_id": condition_id, "base_packet_id": condition["base_packet_id"], "length": condition["length"], "internal_position": condition["internal_position"], "candidate_order": condition["candidate_order"], "gold_content_winner": "clean", "request_timestamp": request_timestamp, "retry_count": attempts}
+                if attempt < retries:
+                    time.sleep(min(2 ** attempt, 30))
+        base = {
+            "run_id": run_id,
+            "condition_id": condition_id,
+            "base_packet_id": condition["base_packet_id"],
+            "length": condition["length"],
+            "internal_position": condition["internal_position"],
+            "candidate_order": condition["candidate_order"],
+            "gold_content_winner": "clean",
+            "request_timestamp": request_timestamp,
+            "retry_count": attempts,
+        }
         if result:
             result_data = result.to_dict()
             try:
@@ -338,15 +364,39 @@ def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_conf
                 content = a_identity if display == "A" else b_identity
             else:
                 content = None
-            record = {**base, **result_data, "model_requested": result.requested_model, "model_returned": result.returned_model, "prompt_token_count": result.prompt_tokens, "output_token_count": result.completion_tokens, "latency": result.latency_seconds, "parsed_winner_A_B_tie": display, "parsed_content_winner_clean_flawed_tie": content, "error_status": None}
+            record = {
+                **base,
+                **result_data,
+                "model_requested": result.requested_model,
+                "model_returned": result.returned_model,
+                "prompt_token_count": result.prompt_tokens,
+                "output_token_count": result.completion_tokens,
+                "latency": result.latency_seconds,
+                "parsed_winner_A_B_tie": display,
+                "parsed_content_winner_clean_flawed_tie": content,
+                "error_status": None,
+            }
+            append_jsonl(responses_path, record)
+            print(f"[{number}/{len(conditions)}] {condition_id}: ok")
         else:
-            record = {**base, "provider": judge_config["provider"], "requested_model": judge_config["model"], "model_requested": judge_config["model"], "returned_model": None, "model_returned": None, "raw_response_text": "", "raw_response": None, "brief_reason": None, "http_status": None, "parsed_winner_A_B_tie": None, "parsed_content_winner_clean_flawed_tie": None, "error_status": error_status or "provider failure"}
-        if result is None:
+            record = {
+                **base,
+                "provider": judge_config["provider"],
+                "requested_model": judge_config["model"],
+                "model_requested": judge_config["model"],
+                "returned_model": None,
+                "model_returned": None,
+                "raw_response_text": "",
+                "raw_response": None,
+                "brief_reason": None,
+                "http_status": None,
+                "parsed_winner_A_B_tie": None,
+                "parsed_content_winner_clean_flawed_tie": None,
+                "error_status": error_status or "provider failure",
+            }
             append_jsonl(run_dir / "errors.jsonl", record)
-            print(f"[{number}/{len(conditions)}] {condition_id}: error")
-            raise RuntimeError(f"provider request failed for {condition_id}; resume after resolving the error")
-        append_jsonl(responses_path, record)
-        print(f"[{number}/{len(conditions)}] {condition_id}: ok")
+            append_jsonl(responses_path, record)
+            print(f"[{number}/{len(conditions)}] {condition_id}: error ({record['error_status']})")
     return run_dir
 
 
@@ -359,6 +409,8 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--confirm-trial-evaluation", action="store_true")
     parser.add_argument("--available-call-budget", type=int)
+    parser.add_argument("--limit", type=int, help="Limit number of condition calls to execute")
+    parser.add_argument("--condition-id", type=str, help="Run a specific condition ID only")
     args = parser.parse_args()
     config = load_config(args.config)
     paths = require_mapping(config.get("paths"), "paths")
@@ -367,7 +419,15 @@ def main() -> None:
         raise SystemExit("provider override must match the frozen configured provider")
     run_id = args.run_id or f"{args.split or 'run'}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     if args.split or "source_rows" in paths:
-        run_dir = run_prmbench(args.config, run_id, args.split or "main", trial_confirmed=args.confirm_trial_evaluation, available_call_budget=args.available_call_budget)
+        run_dir = run_prmbench(
+            args.config,
+            run_id,
+            args.split or "main",
+            trial_confirmed=args.confirm_trial_evaluation,
+            available_call_budget=args.available_call_budget,
+            limit=args.limit,
+            condition_id=args.condition_id,
+        )
     else:
         run_dir = run(args.config, run_id)
     print(f"Run artifacts written to {run_dir}")

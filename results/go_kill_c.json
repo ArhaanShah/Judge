@@ -1,0 +1,39 @@
+{
+  "criteria": {
+    "abs_sc_edge_minus_middle": {
+      "pass": true,
+      "threshold": 0.05,
+      "value": 0.0125
+    },
+    "delta_acc": {
+      "pass": false,
+      "threshold": 0.1,
+      "value": 0.0875
+    },
+    "delta_acc_clean_first": {
+      "pass": true,
+      "threshold": 0.0,
+      "value": 0.15000000000000002
+    },
+    "delta_acc_flawed_first": {
+      "pass": true,
+      "threshold": 0.0,
+      "value": 0.025
+    },
+    "delta_cer": {
+      "pass": false,
+      "threshold": 0.1,
+      "value": null
+    },
+    "integrity": {
+      "pass": true
+    },
+    "sc_middle": {
+      "pass": false,
+      "threshold": 0.8,
+      "value": 0.0
+    }
+  },
+  "decision": "KILL",
+  "primary_length": "16K"
+}

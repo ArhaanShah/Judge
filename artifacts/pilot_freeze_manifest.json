@@ -2163,7 +2163,7 @@
       "domain_inconsistency_prm_test_p2_1947"
     ]
   },
-  "git_commit": "8572af0523a1e6a43da60ecb3474799834ce39d9",
+  "git_commit": "5f5058dcd507e5e45e6b50cd98cf7343a00b5bd5",
   "go_kill_thresholds": {
     "max_swap_consistency_gap": 0.05,
     "min_accuracy_gap": 0.1,
@@ -2171,7 +2171,7 @@
     "min_middle_swap_consistency": 0.8
   },
   "model_id": "command-a-plus-05-2026",
-  "prompt_sha256": "2b4f9040226f035899bac3ad36375845bc593e9784173590de2774dd42e14819",
+  "prompt_sha256": "772bef38a1a9922e31432d8a7e516f7a18a1e9d26185b254500f0505e9cc1004",
   "provider": "cohere",
   "sampling_seed": 20260828,
   "selected_target_ids": [
@@ -2216,5 +2216,5 @@
     "step_contradiction_prm_train_p1_8",
     "step_contradiction_prm_train_p1_94"
   ],
-  "timestamp": "2026-08-28T14:04:22.760690+00:00"
+  "timestamp": "2026-08-28T16:19:16.433378+00:00"
 }

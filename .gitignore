@@ -39,3 +39,4 @@ data/processed/*.jsonl
 results/raw/*/
 results/figures/*.png
 results/raw/api_call_counter.json
+results/gemini/raw

@@ -20,4 +20,9 @@ def make_provider(judge_config: dict[str, Any]) -> JudgeProvider:
         return CohereJudgeProvider(
             timeout_seconds=float(judge_config.get("timeout_seconds", 120))
         )
+    if name in ("gemini", "google"):
+        from .gemini_provider import GeminiJudgeProvider
+        return GeminiJudgeProvider(
+            timeout_seconds=float(judge_config.get("timeout_seconds", 120))
+        )
     raise ValueError(f"unsupported judge provider: {name}")
