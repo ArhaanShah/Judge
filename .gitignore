@@ -38,3 +38,4 @@ data/source/*_packets.jsonl
 data/processed/*.jsonl
 results/raw/*/
 results/figures/*.png
+results/raw/api_call_counter.json
