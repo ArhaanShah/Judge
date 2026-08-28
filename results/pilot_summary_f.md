@@ -1,0 +1,8 @@
+| length | position | n_calls | n_swap_pairs | raw_accuracy | swap_consistency | consistent_error_rate | raw_accuracy_ci_low | raw_accuracy_ci_high | swap_consistency_ci_low | swap_consistency_ci_high | cer_ci_low | cer_ci_high |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 16K | early | 80 | 40 |  |  |  |  |  |  |  |  |  |
+| 16K | middle | 80 | 40 |  |  |  |  |  |  |  |  |  |
+| 16K | late | 80 | 40 |  |  |  |  |  |  |  |  |  |
+| 4K | early | 80 | 40 |  |  |  |  |  |  |  |  |  |
+| 4K | middle | 80 | 40 |  |  |  |  |  |  |  |  |  |
+| 4K | late | 80 | 40 |  |  |  |  |  |  |  |  |  |

@@ -59,7 +59,11 @@ class CohereJudgeProvider:
                 import cohere
             except ImportError as exc:
                 raise ProviderError("install the 'cohere' extra to use Cohere") from exc
-            client = cohere.ClientV2(api_key=api_key, timeout=timeout_seconds)
+            client = cohere.ClientV2(
+                api_key=api_key,
+                timeout=timeout_seconds,
+                log_warning_experimental_features=False,
+            )
         self.client = client
 
     def judge(self, prompt: str, *, model: str, temperature: float, max_output_tokens: int) -> JudgeResponse:
@@ -71,6 +75,7 @@ class CohereJudgeProvider:
                 response_format=RESPONSE_FORMAT,
                 temperature=temperature,
                 max_tokens=max_output_tokens,
+                thinking={"type": "disabled"},
             )
         except Exception as exc:
             status = _value(exc, "status_code", "http_status")
@@ -80,14 +85,49 @@ class CohereJudgeProvider:
                 setattr(error, "retry_after", retry_after)
                 raise error from exc
             raise ProviderError(str(exc)) from exc
+        finish_reason_value = _value(response, "finish_reason")
+        finish_reason = (
+            _value(finish_reason_value, "value") or finish_reason_value
+        )
+
+        if str(finish_reason).upper() != "COMPLETE":
+            raise ProviderError(
+                f"incomplete Cohere response: "
+                f"{finish_reason or 'missing finish reason'}"
+            )
+
         message = _value(response, "message")
         content = _value(message, "content") or []
-        first = content[0] if content else None
-        text = _value(first, "text") or ""
+
+        text = next(
+            (
+                str(_value(item, "text"))
+                for item in content
+                if str(_value(item, "type") or "").lower() == "text"
+                and _value(item, "text")
+            ),
+            "",
+        )
+
+        if not text.strip():
+            raise ProviderError("Cohere response contained no text verdict")
+
         try:
             parsed = json.loads(text)
-        except json.JSONDecodeError:
-            parsed = {}
+        except json.JSONDecodeError as exc:
+            raise ProviderError("Cohere response was not valid JSON") from exc
+
+        if not isinstance(parsed, dict) or parsed.get("winner") not in (
+            "A",
+            "B",
+            "tie",
+        ):
+            raise ProviderError("Cohere response contained an invalid winner")
+
+        if not isinstance(parsed.get("brief_reason"), str):
+            raise ProviderError(
+                "Cohere response contained an invalid brief_reason"
+            )
         usage = _value(response, "usage")
         billed = _value(usage, "billed_units") or usage
         return JudgeResponse(
