@@ -1,0 +1,54 @@
+experiment_name: swap_consistent_still_wrong_pilot
+seed: 20260828
+
+paths:
+  source_items: data/source/base_items.jsonl
+  conditions: data/generated/conditions.jsonl
+  validation_report: data/generated/validation_report.json
+  runs_dir: data/runs
+  prompt_template: configs/prompts/pairwise_judge.txt
+
+items:
+  target_count: 40
+  section_count: 20
+
+positions:
+  early_fraction: 0.10
+  middle_fraction: 0.50
+  late_fraction: 0.90
+  tolerance_fraction: 0.06
+
+context_lengths:
+  - name: 4k
+    target_tokens: 4096
+  - name: 16k
+    target_tokens: 16384
+
+padding:
+  enabled: true
+  target_tolerance_tokens: 160
+
+judge:
+  provider: mock
+  model: deterministic-oracle-v1
+  temperature: 0
+  max_output_tokens: 512
+  timeout_seconds: 120
+  max_transport_retries: 3
+
+bootstrap:
+  n_resamples: 2000
+  ci: 0.95
+  seed: 20260829
+
+pilot_context_length: 16k
+pilot_thresholds:
+  min_accuracy_gap: 0.10
+  min_middle_swap_consistency: 0.80
+  max_swap_consistency_gap: 0.05
+  min_cer_gap: 0.10
+
+integrity:
+  min_parse_success_rate: 0.99
+  max_candidate_length_difference_fraction: 0.02
+

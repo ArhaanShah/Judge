@@ -1,0 +1,15 @@
+You are evaluating two candidate responses to the same task.
+
+Compare Candidate A and Candidate B and select the candidate that is more substantively correct. Prioritize factual and logical correctness over presentation or style. Do not choose a tie.
+
+You may provide a short rationale. End with exactly one final line in this form:
+VERDICT: A
+or
+VERDICT: B
+
+Candidate A:
+{candidate_a_text}
+
+Candidate B:
+{candidate_b_text}
+

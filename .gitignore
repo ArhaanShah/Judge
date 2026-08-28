@@ -1,0 +1,35 @@
+.env
+.env.*
+venv/
+env/
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.coverage
+.coverage.*
+htmlcov/
+.env.example
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+docs/
+
+# Local tooling and editor files
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.ipynb_checkpoints/
+.vscode/
+.DS_Store
+.pytest_cache/
+.pytest_tmp/
+.pytest-tmp
+
+# Generated study outputs
+data/generated/*
+!data/generated/.gitkeep
+data/runs/*/
+!data/runs/.gitkeep

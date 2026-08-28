@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "judge-swap-study"
+version = "0.1.0"
+description = "Auditable pilot for position-swap validation of long-context LLM judges"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["matplotlib>=3.8", "PyYAML>=6.0", "tiktoken>=0.7"]
+
+[project.optional-dependencies]
+openai = ["openai>=1.40"]
+test = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --basetemp=.pytest-tmp"
