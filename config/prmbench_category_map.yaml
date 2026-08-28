@@ -1,0 +1,10 @@
+# Exact labels observed in hitsmy/PRMBench_Preview at the pinned revision.
+counterfactual: Empirical Soundness
+step_contradiction: Step Consistency
+domain_inconsistency: Domain Consistency
+redundency: Non-Redundancy
+circular: Non-Circular Logic
+confidence: Confidence Invariance
+missing_condition: Prerequisite Sensitivity
+deception: Deception Resistance
+multi_solutions: Multi-Solution Consistency

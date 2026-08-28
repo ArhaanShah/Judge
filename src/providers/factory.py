@@ -15,4 +15,9 @@ def make_provider(judge_config: dict[str, Any]) -> JudgeProvider:
         return OpenAIJudgeProvider(
             timeout_seconds=float(judge_config.get("timeout_seconds", 120))
         )
+    if name == "cohere":
+        from .cohere_provider import CohereJudgeProvider
+        return CohereJudgeProvider(
+            timeout_seconds=float(judge_config.get("timeout_seconds", 120))
+        )
     raise ValueError(f"unsupported judge provider: {name}")

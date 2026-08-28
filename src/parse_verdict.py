@@ -10,12 +10,18 @@ from .schemas import CandidateOrder, Condition
 from .utils import read_jsonl, write_jsonl
 
 
-DisplayVerdict = Literal["A", "B"]
-ContentVerdict = Literal["correct", "flawed"]
+DisplayVerdict = Literal["A", "B", "tie"]
+ContentVerdict = Literal["correct", "clean", "flawed", "tie"]
 VERDICT_PATTERN = re.compile(r"^VERDICT:\s*([AB])\s*$", re.MULTILINE)
 
 
 def parse_display_verdict(text: str) -> tuple[DisplayVerdict | None, str]:
+    try:
+        value = json.loads(text)
+        if isinstance(value, dict) and value.get("winner") in ("A", "B", "tie"):
+            return value["winner"], "ok"
+    except (json.JSONDecodeError, TypeError):
+        pass
     matches = list(VERDICT_PATTERN.finditer(text))
     if len(matches) != 1:
         return None, "parse_error"
@@ -34,6 +40,47 @@ def map_content_verdict(
     if candidate_order == "flawed_first":
         return "flawed" if display_verdict == "A" else "correct"
     raise ValueError(f"unknown candidate order: {candidate_order}")
+
+
+def map_prmbench_content_verdict(candidate_order: str, display_verdict: DisplayVerdict) -> ContentVerdict:
+    if display_verdict == "tie":
+        return "tie"
+    if candidate_order == "clean_first":
+        return "clean" if display_verdict == "A" else "flawed"
+    if candidate_order == "flawed_first":
+        return "flawed" if display_verdict == "A" else "clean"
+    raise ValueError(f"unknown candidate order: {candidate_order}")
+
+
+def parse_prmbench_record(condition: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+    display, status = parse_display_verdict(str(response.get("raw_response_text", "")))
+    if response.get("error_status"):
+        display, status = None, "provider_error"
+    content = map_prmbench_content_verdict(str(condition["candidate_order"]), display) if display else None
+    reason = None
+    try:
+        payload = json.loads(str(response.get("raw_response_text", "")))
+        reason = payload.get("brief_reason") if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+        pass
+    return {
+        "condition_id": condition["condition_id"],
+        "item_id": condition["base_packet_id"],
+        "base_packet_id": condition["base_packet_id"],
+        "context_length": condition["length"],
+        "length": condition["length"],
+        "internal_position": condition["internal_position"],
+        "candidate_order": condition["candidate_order"],
+        "display_verdict": display,
+        "content_verdict": content,
+        "is_correct": content == "clean" if content is not None else None,
+        "parse_status": status,
+        "brief_reason": reason,
+        "target_depth": condition["target_midpoint_clean"],
+        "candidate_a_tokens": condition["candidate_a_tokens"],
+        "candidate_b_tokens": condition["candidate_b_tokens"],
+        "returned_model": response.get("returned_model"),
+    }
 
 
 def parse_record(
@@ -74,20 +121,19 @@ def parse_run(run_dir: str | Path) -> list[dict[str, Any]]:
     manifest = json.loads(
         (run_dir / "manifest.json").read_text(encoding="utf-8")
     )
-    conditions_path = manifest["config"]["paths"]["conditions"]
-    conditions = {
-        row.condition_id: row
-        for row in (
-            Condition.from_dict(value)
-            for value in read_jsonl(conditions_path)
-        )
-    }
+    paths = manifest["config"]["paths"]
+    prmbench = "source_rows" in paths
+    conditions_path = paths[f"{manifest.get('split', 'main')}_conditions"] if prmbench else paths["conditions"]
+    if prmbench:
+        conditions = {str(value["condition_id"]): value for value in read_jsonl(conditions_path)}
+    else:
+        conditions = {row.condition_id: row for row in (Condition.from_dict(value) for value in read_jsonl(conditions_path))}
     responses = list(read_jsonl(run_dir / "responses.jsonl"))
     ids = [str(row["condition_id"]) for row in responses]
     counts = {condition_id: ids.count(condition_id) for condition_id in set(ids)}
     parsed = [
         {
-            **parse_record(conditions[str(row["condition_id"])], row),
+            **(parse_prmbench_record(conditions[str(row["condition_id"])], row) if prmbench else parse_record(conditions[str(row["condition_id"])], row)),
             "duplicate_condition_id": (
                 counts[str(row["condition_id"])] > 1
             ),

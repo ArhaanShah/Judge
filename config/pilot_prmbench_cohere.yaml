@@ -1,0 +1,36 @@
+experiment_name: swap_consistent_still_wrong_prmbench_pilot
+seed: 20260828
+paths:
+  source_rows: data/source/prmbench_rows.jsonl
+  source_manifest: data/source/prmbench_manifest.json
+  main_packets: data/source/main_packets.jsonl
+  smoke_packets: data/source/smoke_packets.jsonl
+  main_conditions: data/processed/pilot_conditions.jsonl
+  smoke_conditions: data/processed/smoke_conditions.jsonl
+  main_validation_report: data/processed/main_validation_report.json
+  smoke_validation_report: data/processed/smoke_validation_report.json
+  runs_dir: results/raw
+  prompt_template: config/prompts/pairwise_judge.txt
+  freeze_manifest: artifacts/pilot_freeze_manifest.json
+  results_dir: results
+tokenizer: CohereLabs/command-a-plus-05-2026-w4a4
+lengths:
+  4K: {target: 4000, min: 3800, max: 4200}
+  16K: {target: 16000, min: 15200, max: 16800}
+positions:
+  early: {target: 0.15, min: 0.10, max: 0.20}
+  middle: {target: 0.50, min: 0.45, max: 0.55}
+  late: {target: 0.85, min: 0.80, max: 0.90}
+judge:
+  provider: cohere
+  model: command-a-plus-05-2026
+  temperature: 0
+  max_output_tokens: 256
+  timeout_seconds: 120
+  max_transport_retries: 5
+  max_requests_per_minute: 15
+budget: {hard_api_call_cap: 800, required_available_calls: 800}
+bootstrap: {n_resamples: 10000, ci: 0.95, seed: 20260828}
+pilot_context_length: 16K
+pilot_thresholds: {min_accuracy_gap: 0.10, min_middle_swap_consistency: 0.80, max_swap_consistency_gap: 0.05, min_cer_gap: 0.10}
+integrity: {min_parse_success_rate: 1.0, max_candidate_length_difference_fraction: 0.10}

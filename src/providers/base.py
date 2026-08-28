@@ -23,6 +23,9 @@ class JudgeResponse:
     raw_response_text: str
     latency_seconds: float
     error_status: str | None = None
+    raw_response: Any = None
+    brief_reason: str | None = None
+    http_status: int | None = 200
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -22,11 +22,9 @@ def aggregate_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     for (item_id, context, position), pair in sorted(grouped.items()):
         by_order = {str(row["candidate_order"]): row for row in pair}
-        complete = len(pair) == 2 and set(by_order) == {
-            "correct_first",
-            "flawed_first",
-        }
-        first = by_order.get("correct_first")
+        first_label = "clean_first" if "clean_first" in by_order else "correct_first"
+        complete = len(pair) == 2 and set(by_order) == {first_label, "flawed_first"}
+        first = by_order.get(first_label)
         second = by_order.get("flawed_first")
         parse_ok = bool(
             complete
@@ -37,16 +35,14 @@ def aggregate_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         first_verdict = first["content_verdict"] if first else None
         second_verdict = second["content_verdict"] if second else None
-        swap_consistent = (
-            first_verdict == second_verdict if parse_ok else None
-        )
+        swap_consistent = (first_verdict == second_verdict and first_verdict != "tie") if parse_ok else None
         consistent_winner = first_verdict if swap_consistent else None
         output.append(
             {
                 "item_id": item_id,
                 "context_length": context,
                 "internal_position": position,
-                "correct_first_content_verdict": first_verdict,
+                f"{first_label}_content_verdict": first_verdict,
                 "flawed_first_content_verdict": second_verdict,
                 "pair_complete": complete,
                 "parse_ok": parse_ok,

@@ -1,0 +1,14 @@
+{
+  "dataset": "hitsmy/PRMBench_Preview",
+  "dataset_fingerprint": "e0749783b1f89406",
+  "license": "apache-2.0",
+  "n_rows": 6216,
+  "retrieved_at": "2026-08-28T13:17:50.548147+00:00",
+  "revision": "5cc7683d0ae5797f84d7aeac0607966f277c39e1",
+  "sampling_seed": 20260828,
+  "target_categories": [
+    "Empirical Soundness",
+    "Step Consistency",
+    "Domain Consistency"
+  ]
+}

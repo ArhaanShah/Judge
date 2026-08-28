@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import random
 import subprocess
 import time
@@ -18,6 +20,7 @@ from .providers.factory import make_provider
 from .schemas import Condition
 from .utils import (
     append_jsonl,
+    load_env_file,
     load_config,
     read_jsonl,
     require_mapping,
@@ -25,6 +28,7 @@ from .utils import (
     write_json,
 )
 from .validate_conditions import validate_from_config
+from .validate_conditions import validate_prmbench_from_config
 
 
 def utc_now() -> str:
@@ -200,12 +204,172 @@ def run(config_path: str | Path, run_id: str) -> Path:
     return run_dir
 
 
+def provider_preflight(config: dict[str, Any], *, trial_confirmed: bool, available_call_budget: int | None) -> None:
+    load_env_file()
+    judge = require_mapping(config.get("judge"), "judge")
+    budget = require_mapping(config.get("budget"), "budget")
+    required = int(budget["required_available_calls"])
+    print(f"provider: {judge['provider']}")
+    print(f"model: {judge['model']}")
+    print(f"API key present: {'yes' if bool(os.environ.get('COHERE_API_KEY')) else 'no'}")
+    print(f"trial/evaluation mode confirmed by operator: {'yes' if trial_confirmed else 'no'}")
+    print(f"monthly call budget entered by operator: {available_call_budget if available_call_budget is not None else 'not entered'}")
+    print(f"planned maximum calls: {int(budget['hard_api_call_cap'])}")
+    if not os.environ.get("COHERE_API_KEY"):
+        raise RuntimeError("COHERE_API_KEY is not present")
+    if not trial_confirmed:
+        raise RuntimeError("operator must explicitly confirm trial/evaluation mode")
+    if available_call_budget is None or available_call_budget < required:
+        raise RuntimeError(f"available free call budget must be at least {required}")
+
+
+def _counter_value(path: Path) -> int:
+    if not path.exists():
+        return 0
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return int(value.get("api_calls", 0))
+
+
+def _increment_counter(path: Path, cap: int) -> int:
+    current = _counter_value(path)
+    if current >= cap:
+        raise RuntimeError(f"hard API-call cap of {cap} reached; request not sent")
+    current += 1
+    write_json(path, {"api_calls": current, "updated_at": utc_now()})
+    return current
+
+
+def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_confirmed: bool, available_call_budget: int | None) -> Path:
+    config_path = Path(config_path)
+    config = load_config(config_path)
+    paths = require_mapping(config.get("paths"), "paths")
+    report = validate_prmbench_from_config(config, split)
+    write_json(paths[f"{split}_validation_report"], report)
+    if not report["passed"]:
+        raise RuntimeError("condition validation failed; no judge requests were sent")
+    if split == "main":
+        freeze_path = Path(paths["freeze_manifest"])
+        if not freeze_path.exists():
+            raise RuntimeError("main pilot is not frozen")
+        frozen = json.loads(freeze_path.read_text(encoding="utf-8"))
+        if frozen.get("condition_file_sha256") != sha256_file(paths["main_conditions"]):
+            raise RuntimeError("main condition file changed after freeze")
+        source_manifest = json.loads(Path(paths["source_manifest"]).read_text(encoding="utf-8"))
+        frozen_checks = {
+            "prompt": frozen.get("prompt_sha256") == sha256_file(paths["prompt_template"]),
+            "provider": frozen.get("provider") == config["judge"]["provider"],
+            "model": frozen.get("model_id") == config["judge"]["model"],
+            "dataset revision": frozen.get("dataset_revision") == source_manifest.get("revision"),
+            "dataset fingerprint": frozen.get("dataset_fingerprint") == source_manifest.get("dataset_fingerprint"),
+            "Git commit": frozen.get("git_commit") == git_commit(),
+        }
+        changed = [name for name, passed in frozen_checks.items() if not passed]
+        if changed:
+            raise RuntimeError("main pilot inputs changed after freeze: " + ", ".join(changed))
+    provider_preflight(config, trial_confirmed=trial_confirmed, available_call_budget=available_call_budget)
+    judge_config = require_mapping(config.get("judge"), "judge")
+    run_dir = Path(paths["runs_dir"]) / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = run_dir / "manifest.json"
+    conditions_path = Path(paths[f"{split}_conditions"])
+    fingerprint = sha256_file(conditions_path)
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("conditions_hash") != fingerprint:
+            raise RuntimeError("refusing to resume with changed conditions")
+    else:
+        write_json(manifest_path, {"run_id": run_id, "split": split, "created_at": utc_now(), "git_commit": git_commit(), "conditions_hash": fingerprint, "config": config, "provider": judge_config["provider"], "model": judge_config["model"]})
+    conditions = list(read_jsonl(conditions_path))
+    random.Random(int(config["seed"])).shuffle(conditions)
+    responses_path = run_dir / "responses.jsonl"
+    requests_path = run_dir / "requests.jsonl"
+    completed = _existing_ids(responses_path)
+    requested = _existing_ids(requests_path)
+    provider = make_provider(judge_config)
+    template = load_prompt_template(paths["prompt_template"])
+    retries = int(judge_config.get("max_transport_retries", 0))
+    cap = int(require_mapping(config.get("budget"), "budget")["hard_api_call_cap"])
+    counter_path = Path(paths["runs_dir"]) / "api_call_counter.json"
+    minimum_interval = 60.0 / float(judge_config.get("max_requests_per_minute", 15))
+    last_attempt_at = 0.0
+    for number, condition in enumerate(conditions, start=1):
+        condition_id = str(condition["condition_id"])
+        if condition_id in completed:
+            continue
+        prompt = render_prompt(template, str(condition["candidate_a_text"]), str(condition["candidate_b_text"]))
+        if condition_id not in requested:
+            append_jsonl(requests_path, {"run_id": run_id, "condition_id": condition_id, "saved_at": utc_now(), "execution_index": number, "provider": judge_config["provider"], "model": judge_config["model"], "prompt": prompt})
+            requested.add(condition_id)
+        request_timestamp = utc_now()
+        result = None
+        error_status = None
+        attempts = 0
+        for attempt in range(retries + 1):
+            attempts = attempt
+            elapsed = time.monotonic() - last_attempt_at
+            if elapsed < minimum_interval:
+                time.sleep(minimum_interval - elapsed)
+            _increment_counter(counter_path, cap)
+            last_attempt_at = time.monotonic()
+            try:
+                result = provider.judge(prompt, model=str(judge_config["model"]), temperature=float(judge_config["temperature"]), max_output_tokens=int(judge_config["max_output_tokens"]))
+                break
+            except RetriableProviderError as exc:
+                error_status = str(exc)
+                if attempt < retries:
+                    retry_after = getattr(exc, "retry_after", None)
+                    time.sleep(float(retry_after) if retry_after else min(2 ** attempt, 30))
+            except ProviderError as exc:
+                error_status = str(exc)
+                break
+        base = {"run_id": run_id, "condition_id": condition_id, "base_packet_id": condition["base_packet_id"], "length": condition["length"], "internal_position": condition["internal_position"], "candidate_order": condition["candidate_order"], "gold_content_winner": "clean", "request_timestamp": request_timestamp, "retry_count": attempts}
+        if result:
+            result_data = result.to_dict()
+            try:
+                structured = json.loads(result.raw_response_text)
+            except json.JSONDecodeError:
+                structured = {}
+            display = structured.get("winner") if isinstance(structured, dict) and structured.get("winner") in ("A", "B", "tie") else None
+            if display == "tie":
+                content = "tie"
+            elif display in ("A", "B"):
+                a_identity = condition["candidate_a_identity"]
+                b_identity = condition["candidate_b_identity"]
+                content = a_identity if display == "A" else b_identity
+            else:
+                content = None
+            record = {**base, **result_data, "model_requested": result.requested_model, "model_returned": result.returned_model, "prompt_token_count": result.prompt_tokens, "output_token_count": result.completion_tokens, "latency": result.latency_seconds, "parsed_winner_A_B_tie": display, "parsed_content_winner_clean_flawed_tie": content, "error_status": None}
+        else:
+            record = {**base, "provider": judge_config["provider"], "requested_model": judge_config["model"], "model_requested": judge_config["model"], "returned_model": None, "model_returned": None, "raw_response_text": "", "raw_response": None, "brief_reason": None, "http_status": None, "parsed_winner_A_B_tie": None, "parsed_content_winner_clean_flawed_tie": None, "error_status": error_status or "provider failure"}
+        if result is None:
+            append_jsonl(run_dir / "errors.jsonl", record)
+            print(f"[{number}/{len(conditions)}] {condition_id}: error")
+            raise RuntimeError(f"provider request failed for {condition_id}; resume after resolving the error")
+        append_jsonl(responses_path, record)
+        print(f"[{number}/{len(conditions)}] {condition_id}: ok")
+    return run_dir
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run pairwise judge calls")
     parser.add_argument("--config", default="configs/pilot.yaml")
-    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-id")
+    parser.add_argument("--split", choices=("smoke", "main"))
+    parser.add_argument("--provider")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--confirm-trial-evaluation", action="store_true")
+    parser.add_argument("--available-call-budget", type=int)
     args = parser.parse_args()
-    run_dir = run(args.config, args.run_id)
+    config = load_config(args.config)
+    paths = require_mapping(config.get("paths"), "paths")
+    configured_provider = str(require_mapping(config.get("judge"), "judge")["provider"])
+    if args.provider and args.provider != configured_provider:
+        raise SystemExit("provider override must match the frozen configured provider")
+    run_id = args.run_id or f"{args.split or 'run'}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    if args.split or "source_rows" in paths:
+        run_dir = run_prmbench(args.config, run_id, args.split or "main", trial_confirmed=args.confirm_trial_evaluation, available_call_budget=args.available_call_budget)
+    else:
+        run_dir = run(args.config, run_id)
     print(f"Run artifacts written to {run_dir}")
 
 

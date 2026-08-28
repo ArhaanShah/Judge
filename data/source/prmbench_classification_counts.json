@@ -1,0 +1,11 @@
+{
+  "circular": 758,
+  "confidence": 757,
+  "counterfactual": 757,
+  "deception": 750,
+  "domain_inconsistency": 757,
+  "missing_condition": 756,
+  "multi_solutions": 165,
+  "redundency": 758,
+  "step_contradiction": 758
+}

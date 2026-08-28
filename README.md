@@ -28,9 +28,56 @@ That produces 480 judge calls. At the nominal prompt targets, the run contains
 about 4.9 million input tokens. The configured 512-token output cap permits at
 most 245,760 output tokens, though the verdict contract should use far fewer.
 
-The source data is intentionally not fabricated by the infrastructure. Create
-`data/source/base_items.jsonl` with 40 independently verified items before a
-real pilot. Each line must follow this shape:
+The confirmatory implementation uses public PRMBench source rows and never
+hand-authors or edits their errors. The older generic `configs/pilot.yaml`
+path remains available for offline development and backwards-compatible mock
+tests; it is not the preregistered pilot.
+
+## PRMBench/Cohere pilot workflow
+
+Install the pilot dependencies:
+
+```powershell
+python -m pip install -e ".[test,pilot]"
+```
+
+Then execute the frozen stages in order:
+
+```powershell
+python -m src.data.prmbench_adapter --inspect
+python -m src.build_conditions --config config/pilot_prmbench_cohere.yaml --split smoke
+python -m src.validate_conditions --config config/pilot_prmbench_cohere.yaml --split smoke
+python -m src.run_judge --config config/pilot_prmbench_cohere.yaml --split smoke --provider cohere --confirm-trial-evaluation --available-call-budget 800
+
+python -m src.build_conditions --config config/pilot_prmbench_cohere.yaml --split main
+python -m src.validate_conditions --config config/pilot_prmbench_cohere.yaml --split main
+# Commit the validated implementation and generated manifests, then:
+python -m src.freeze_pilot --config config/pilot_prmbench_cohere.yaml
+python -m src.run_judge --config config/pilot_prmbench_cohere.yaml --split main --provider cohere --resume --confirm-trial-evaluation --available-call-budget 800
+python -m src.analyze --config config/pilot_prmbench_cohere.yaml --split main
+```
+
+Both live stages fail closed unless `COHERE_API_KEY` is present, the operator
+explicitly confirms the key is trial/evaluation-only, and at least 800 free
+calls remain. A persistent counter aborts before call 801 and counts retries.
+The main stage additionally requires a clean-Git freeze manifest and refuses
+to resume if the condition file changed. Unit tests use mocked providers and
+make zero live requests.
+
+The adapter first saves the released `classification` distribution. Review
+that output and update `config/prmbench_category_map.yaml` with exact released
+strings if needed; unknown labels always abort. The generated main condition
+file contains 480 calls, while smoke contains 24 calls.
+
+The analysis writes the preregistered outputs to `results/`: summary CSV and
+Markdown tables, `go_kill.json`, and five figures. Raw request/response logs
+remain under `results/raw/<run-id>/`, including provider payloads, model IDs,
+usage, latency, and retry counts.
+
+## Legacy generic fixture format
+
+For the legacy mock path, create `data/source/base_items.jsonl` with 40
+independently verified items. Each line follows this shape:
 
 ```json
 {

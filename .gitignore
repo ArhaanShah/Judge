@@ -33,3 +33,8 @@ data/generated/*
 !data/generated/.gitkeep
 data/runs/*/
 !data/runs/.gitkeep
+data/source/prmbench_rows.jsonl
+data/source/*_packets.jsonl
+data/processed/*.jsonl
+results/raw/*/
+results/figures/*.png

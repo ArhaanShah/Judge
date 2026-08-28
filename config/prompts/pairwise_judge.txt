@@ -1,0 +1,15 @@
+You are evaluating two answer sheets to the same set of independent reasoning problems.
+
+Choose the candidate whose solutions are more correct overall.
+
+Prioritize mathematical and logical correctness. A substantive reasoning error should outweigh stylistic differences. Do not prefer a candidate because it appears first, is more verbose, or because an error occurs earlier or later in the answer sheet.
+
+Return a JSON object only, following the required schema. Keep brief_reason to one sentence.
+
+<CANDIDATE_A>
+{candidate_a_text}
+</CANDIDATE_A>
+
+<CANDIDATE_B>
+{candidate_b_text}
+</CANDIDATE_B>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import random
@@ -33,6 +34,8 @@ class PilotMetrics:
     late_cer: float | None
     edge_cer: float | None
     delta_cer: float | None
+    delta_acc_clean_first: float | None = None
+    delta_acc_flawed_first: float | None = None
 
 
 def _mean(values: Iterable[bool | float]) -> float | None:
@@ -113,6 +116,12 @@ def compute_pilot_metrics(
     edge_accuracy = accuracy(edge_calls)
     edge_sc = swap_consistency(edge_pairs)
     edge_cer = consistent_error_rate(edge_pairs)
+    order_deltas: dict[str, float | None] = {}
+    first_order = "clean_first" if any(row.get("candidate_order") == "clean_first" for row in parsed) else "correct_first"
+    for order in (first_order, "flawed_first"):
+        position_values = {position: accuracy(row for row in call_by_position[position] if row.get("candidate_order") == order) for position in POSITIONS}
+        edge = _mean(value for value in (position_values["early"], position_values["late"]) if value is not None)
+        order_deltas[order] = _subtract(edge, position_values["middle"])
     return PilotMetrics(
         early_accuracy=accuracies["early"],
         middle_accuracy=accuracies["middle"],
@@ -129,6 +138,8 @@ def compute_pilot_metrics(
         late_cer=cers["late"],
         edge_cer=edge_cer,
         delta_cer=_subtract(cers["middle"], edge_cer),
+        delta_acc_clean_first=order_deltas[first_order],
+        delta_acc_flawed_first=order_deltas["flawed_first"],
     )
 
 
@@ -152,7 +163,7 @@ def evaluate_pilot(
         ),
         "swap_consistency_drop_le_threshold": (
             metrics.delta_sc is not None
-            and metrics.delta_sc <= max_sc_gap
+            and abs(metrics.delta_sc) <= max_sc_gap
         ),
         "middle_cer_increase_ge_threshold": (
             metrics.delta_cer is not None
@@ -160,6 +171,9 @@ def evaluate_pilot(
         ),
         "data_integrity_passed": data_integrity_passed,
     }
+    if metrics.delta_acc_clean_first is not None or metrics.delta_acc_flawed_first is not None:
+        checks["clean_first_nonnegative"] = metrics.delta_acc_clean_first is not None and metrics.delta_acc_clean_first >= 0
+        checks["flawed_first_nonnegative"] = metrics.delta_acc_flawed_first is not None and metrics.delta_acc_flawed_first >= 0
     return {
         "decision": "GO" if all(checks.values()) else "KILL",
         "checks": checks,
@@ -168,6 +182,8 @@ def evaluate_pilot(
             "middle_swap_consistency": metrics.middle_swap_consistency,
             "delta_sc": metrics.delta_sc,
             "delta_cer": metrics.delta_cer,
+            "delta_acc_clean_first": metrics.delta_acc_clean_first,
+            "delta_acc_flawed_first": metrics.delta_acc_flawed_first,
         },
         "thresholds": {
             "min_accuracy_gap": min_accuracy_gap,
@@ -207,7 +223,8 @@ def metric_snapshot(
             snapshot[f"cer.{context}.{position}"] = (
                 consistent_error_rate(pair_rows)
             )
-            for order in ("correct_first", "flawed_first"):
+            first_order = "clean_first" if any(row.get("candidate_order") == "clean_first" for row in call_rows) else "correct_first"
+            for order in (first_order, "flawed_first"):
                 snapshot[f"accuracy.{context}.{position}.{order}"] = accuracy(
                     row for row in call_rows
                     if row["candidate_order"] == order
@@ -292,11 +309,10 @@ def integrity_checks(
     parse_rate = _mean(
         row.get("parse_status") == "ok" for row in parsed
     ) or 0.0
-    expected_calls = (
+    prmbench = "lengths" in config
+    expected_calls = (40 * len(config["lengths"]) * 3 * 2) if prmbench else (
         int(require_mapping(config.get("items"), "items")["target_count"])
-        * len(config["context_lengths"])
-        * 3
-        * 2
+        * len(config["context_lengths"]) * 3 * 2
     )
     ids = [str(row["condition_id"]) for row in parsed]
     max_difference = max(
@@ -352,6 +368,7 @@ def integrity_checks(
         ),
         "relocation_invariance": bool(validation_report.get("passed")),
         "gold_label_integrity": bool(validation_report.get("passed")),
+        "single_judge_model": len({str(row.get("returned_model")) for row in parsed if row.get("returned_model")}) == 1,
     }
     return {
         "passed": all(checks.values()),
@@ -394,7 +411,8 @@ def grouped_summaries(
                 if row["context_length"] == context
                 and row["internal_position"] == position
             ]
-            for order in ("correct_first", "flawed_first"):
+            first_order = "clean_first" if any(row.get("candidate_order") == "clean_first" for row in position_calls) else "correct_first"
+            for order in (first_order, "flawed_first"):
                 rows = [
                     row for row in position_calls
                     if row["candidate_order"] == order
@@ -449,7 +467,8 @@ def grouped_summaries(
                 "internal_position", list(POSITIONS)
             ),
             "by_candidate_order": call_group(
-                "candidate_order", ["correct_first", "flawed_first"]
+                "candidate_order",
+                (["clean_first", "flawed_first"] if any(row.get("candidate_order") == "clean_first" for row in parsed) else ["correct_first", "flawed_first"]),
             ),
             "cross_tabulation": cross_tabulation,
         },
@@ -458,16 +477,18 @@ def grouped_summaries(
 
 
 def generate_figures(
-    run_dir: Path,
+    output_dir: Path,
     snapshot: dict[str, float | None],
     intervals: dict[str, dict[str, float | int] | None],
     contexts: list[str],
     pilot_context: str,
 ) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    figures = run_dir / "figures"
-    figures.mkdir(exist_ok=True)
+    figures = output_dir / "figures"
+    figures.mkdir(parents=True, exist_ok=True)
     x = list(range(len(POSITIONS)))
 
     def series(metric: str, context: str) -> tuple[list[float], list[list[float]]]:
@@ -512,49 +533,50 @@ def generate_figures(
         "02_swap_consistency_by_position.png",
     )
 
-    fig, axis = plt.subplots(figsize=(7, 4.5))
-    for metric, label in (
-        ("accuracy", "Accuracy"),
-        ("swap_consistency", "Swap consistency"),
-    ):
-        values, errors = series(metric, pilot_context)
-        axis.errorbar(
-            x, values, yerr=errors, marker="o", capsize=3, label=label
-        )
-    axis.set_xticks(x, POSITIONS)
-    axis.set_ylim(0, 1)
-    axis.set_ylabel("Rate")
-    axis.set_title(f"Accuracy-consistency dissociation ({pilot_context})")
-    axis.legend()
-    fig.tight_layout()
-    fig.savefig(figures / "03_accuracy_consistency_dissociation.png", dpi=180)
-    plt.close(fig)
-
-    position_plot("cer", "Consistent Error Rate", "04_cer_by_position.png")
+    position_plot("cer", "Consistent Error Rate", "03_cer_by_position.png")
 
     fig, axis = plt.subplots(figsize=(8, 4.5))
-    for context in contexts:
+    for context in [pilot_context]:
         for order, style in (
-            ("correct_first", "-"),
+            (("clean_first" if any(key.endswith(".clean_first") for key in snapshot) else "correct_first"), "-"),
             ("flawed_first", "--"),
         ):
             values = [
                 snapshot.get(f"accuracy.{context}.{position}.{order}")
                 for position in POSITIONS
             ]
-            axis.plot(
-                x,
-                [float("nan") if value is None else value for value in values],
-                style,
-                marker="o",
-                label=f"{context} / {order}",
-            )
+            lows, highs = [], []
+            for position, value in zip(POSITIONS, values):
+                interval = intervals.get(f"accuracy.{context}.{position}.{order}") or {}
+                lows.append(0 if value is None or interval.get("low") is None else max(0, value - float(interval["low"])))
+                highs.append(0 if value is None or interval.get("high") is None else max(0, float(interval["high"]) - value))
+            axis.errorbar(x, [float("nan") if value is None else value for value in values], yerr=[lows, highs], linestyle=style, marker="o", capsize=3, label=order)
     axis.set_xticks(x, POSITIONS)
     axis.set_ylim(0, 1)
     axis.set_ylabel("Accuracy")
     axis.legend(fontsize="small")
     fig.tight_layout()
-    fig.savefig(figures / "05_candidate_order_diagnostic.png", dpi=180)
+    fig.savefig(figures / "04_accuracy_by_candidate_order.png", dpi=180)
+    plt.close(fig)
+
+    fig, axis = plt.subplots(figsize=(7, 4.5))
+    for context in contexts:
+        for position in POSITIONS:
+            acc = snapshot.get(f"accuracy.{context}.{position}")
+            sc = snapshot.get(f"swap_consistency.{context}.{position}")
+            if acc is not None and sc is not None:
+                acc_ci = intervals.get(f"accuracy.{context}.{position}") or {}
+                sc_ci = intervals.get(f"swap_consistency.{context}.{position}") or {}
+                xerr = [[max(0, sc - float(sc_ci.get("low", sc)))], [max(0, float(sc_ci.get("high", sc)) - sc)]]
+                yerr = [[max(0, acc - float(acc_ci.get("low", acc)))], [max(0, float(acc_ci.get("high", acc)) - acc)]]
+                axis.errorbar(sc, acc, xerr=xerr, yerr=yerr, fmt="o", capsize=2)
+                axis.annotate(f"{context}-{position}", (sc, acc), xytext=(4, 4), textcoords="offset points", fontsize="x-small")
+    axis.set_xlim(0, 1)
+    axis.set_ylim(0, 1)
+    axis.set_xlabel("Swap consistency")
+    axis.set_ylabel("Raw accuracy")
+    fig.tight_layout()
+    fig.savefig(figures / "05_accuracy_vs_swap_consistency.png", dpi=180)
     plt.close(fig)
 
 
@@ -566,7 +588,6 @@ def print_decision(decision: dict[str, Any]) -> None:
     values = decision["values"]
     thresholds = decision["thresholds"]
     checks = decision["checks"]
-    print(f"\nPILOT DECISION: {decision['decision']}\n")
     lines = (
         (
             "middle_accuracy_deficit_ge_threshold",
@@ -594,6 +615,56 @@ def print_decision(decision: dict[str, Any]) -> None:
     )
     for key, message in lines:
         print(f"[{'PASS' if checks[key] else 'FAIL'}] {message}")
+    for key in ("clean_first_nonnegative", "flawed_first_nonnegative"):
+        if key in checks:
+            print(f"[{'PASS' if checks[key] else 'FAIL'}] {key}")
+    if not checks.get("data_integrity_passed", False):
+        print("REASON: INVALID PILOT / INTEGRITY FAILURE")
+    print(f"PILOT DECISION: {decision['decision']}")
+
+
+def write_required_outputs(
+    results_dir: Path,
+    parsed: list[dict[str, Any]],
+    pairs: list[dict[str, Any]],
+    snapshot: dict[str, float | None],
+    intervals: dict[str, dict[str, float | int] | None],
+    decision: dict[str, Any],
+) -> None:
+    results_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    for context in sorted({str(row["context_length"]) for row in parsed}):
+        for position in POSITIONS:
+            calls = [row for row in parsed if row["context_length"] == context and row["internal_position"] == position]
+            pair_rows = [row for row in pairs if row["context_length"] == context and row["internal_position"] == position]
+            keys = {"raw_accuracy": f"accuracy.{context}.{position}", "swap_consistency": f"swap_consistency.{context}.{position}", "consistent_error_rate": f"cer.{context}.{position}"}
+            output: dict[str, Any] = {"length": context, "position": position, "n_calls": len(calls), "n_swap_pairs": len(pair_rows)}
+            for column, key in keys.items():
+                output[column] = snapshot.get(key)
+                interval = intervals.get(key) or {}
+                prefix = "cer" if column == "consistent_error_rate" else column
+                output[f"{prefix}_ci_low"] = interval.get("low")
+                output[f"{prefix}_ci_high"] = interval.get("high")
+            rows.append(output)
+    columns = ["length", "position", "n_calls", "n_swap_pairs", "raw_accuracy", "swap_consistency", "consistent_error_rate", "raw_accuracy_ci_low", "raw_accuracy_ci_high", "swap_consistency_ci_low", "swap_consistency_ci_high", "cer_ci_low", "cer_ci_high"]
+    with (results_dir / "pilot_summary.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+    markdown = ["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"]
+    markdown.extend("| " + " | ".join("" if row.get(column) is None else str(row.get(column)) for column in columns) + " |" for row in rows)
+    (results_dir / "pilot_summary.md").write_text("\n".join(markdown) + "\n", encoding="utf-8")
+    checks, values, thresholds = decision["checks"], decision["values"], decision["thresholds"]
+    criteria = {
+        "delta_acc": {"value": values.get("delta_acc"), "threshold": thresholds["min_accuracy_gap"], "pass": checks["middle_accuracy_deficit_ge_threshold"]},
+        "sc_middle": {"value": values.get("middle_swap_consistency"), "threshold": thresholds["min_middle_swap_consistency"], "pass": checks["middle_swap_consistency_ge_threshold"]},
+        "abs_sc_edge_minus_middle": {"value": abs(values["delta_sc"]) if values.get("delta_sc") is not None else None, "threshold": thresholds["max_swap_consistency_gap"], "pass": checks["swap_consistency_drop_le_threshold"]},
+        "delta_cer": {"value": values.get("delta_cer"), "threshold": thresholds["min_cer_gap"], "pass": checks["middle_cer_increase_ge_threshold"]},
+        "delta_acc_clean_first": {"value": values.get("delta_acc_clean_first"), "threshold": 0.0, "pass": checks.get("clean_first_nonnegative", False)},
+        "delta_acc_flawed_first": {"value": values.get("delta_acc_flawed_first"), "threshold": 0.0, "pass": checks.get("flawed_first_nonnegative", False)},
+        "integrity": {"pass": checks["data_integrity_passed"]},
+    }
+    write_json(results_dir / "go_kill.json", {"decision": decision["decision"], "primary_length": "16K", "criteria": criteria})
 
 
 def analyze_run(run_dir: str | Path) -> dict[str, Any]:
@@ -618,7 +689,9 @@ def analyze_run(run_dir: str | Path) -> dict[str, Any]:
             row["duplicate_condition_id"] = True
     pairs = aggregate_pairs(parsed)
     write_jsonl(run_dir / "pair_level.jsonl", pairs)
-    validation_path = Path(config["paths"]["validation_report"])
+    split = str(manifest.get("split", "main"))
+    validation_key = f"{split}_validation_report" if "source_rows" in config["paths"] else "validation_report"
+    validation_path = Path(config["paths"][validation_key])
     validation_report = json.loads(
         validation_path.read_text(encoding="utf-8")
     )
@@ -654,12 +727,25 @@ def analyze_run(run_dir: str | Path) -> dict[str, Any]:
         },
         "integrity": integrity,
     }
+    if "4K" in {str(row["context_length"]) for row in parsed} and pilot_context == "16K":
+        short_metrics = compute_pilot_metrics(parsed, pairs, "4K")
+        metrics["mechanism_check"] = {
+            "delta_acc_16K_minus_4K": _subtract(pilot_metrics.delta_acc, short_metrics.delta_acc),
+            "delta_cer_16K_minus_4K": _subtract(pilot_metrics.delta_cer, short_metrics.delta_cer),
+        }
+    acc_interval = intervals.get("pilot.delta_acc") or {}
+    cer_interval = intervals.get("pilot.delta_cer") or {}
+    metrics["strong_pilot_evidence"] = bool(
+        acc_interval.get("low") is not None and float(acc_interval["low"]) > 0
+        and cer_interval.get("low") is not None and float(cer_interval["low"]) > 0
+    )
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "pilot_decision.json", decision)
     contexts = sorted({str(row["context_length"]) for row in parsed})
-    generate_figures(
-        run_dir, snapshot, intervals, contexts, pilot_context
-    )
+    output_dir = Path(config["paths"].get("results_dir", run_dir)) if "source_rows" in config["paths"] else run_dir
+    generate_figures(output_dir, snapshot, intervals, contexts, pilot_context)
+    if "source_rows" in config["paths"]:
+        write_required_outputs(output_dir, parsed, pairs, snapshot, intervals, decision)
     print("DATA INTEGRITY")
     for name, passed in integrity["checks"].items():
         print(f"[{'PASS' if passed else 'FAIL'}] {name}")
@@ -671,10 +757,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Analyze a completed judge run"
     )
-    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-id")
     parser.add_argument("--runs-dir", default="data/runs")
+    parser.add_argument("--config")
+    parser.add_argument("--split", choices=("smoke", "main"), default="main")
     args = parser.parse_args()
-    analyze_run(Path(args.runs_dir) / args.run_id)
+    if args.config:
+        from .utils import load_config
+        config = load_config(args.config)
+        runs_dir = Path(config["paths"]["runs_dir"])
+        if args.run_id:
+            run_dir = runs_dir / args.run_id
+        else:
+            candidates = sorted((path for path in runs_dir.iterdir() if path.is_dir() and (path / "manifest.json").exists()), key=lambda path: path.stat().st_mtime)
+            if not candidates:
+                raise SystemExit("no run directory found; pass --run-id")
+            run_dir = candidates[-1]
+        analyze_run(run_dir)
+    else:
+        if not args.run_id:
+            raise SystemExit("--run-id is required unless --config is supplied")
+        analyze_run(Path(args.runs_dir) / args.run_id)
 
 
 if __name__ == "__main__":
