@@ -11,7 +11,7 @@ from ..utils import load_env_file
 
 RESPONSE_FORMAT = {
     "type": "json_object",
-    "schema": {
+    "json_schema": {
         "type": "object",
         "properties": {
             "winner": {"type": "string", "enum": ["A", "B", "tie"]},
@@ -68,6 +68,7 @@ class CohereJudgeProvider:
 
     def judge(self, prompt: str, *, model: str, temperature: float, max_output_tokens: int) -> JudgeResponse:
         started = time.perf_counter()
+        token_budget = min(128, max_output_tokens // 2) if max_output_tokens >= 64 else 32
         try:
             response = self.client.chat(
                 model=model,
@@ -75,7 +76,7 @@ class CohereJudgeProvider:
                 response_format=RESPONSE_FORMAT,
                 temperature=temperature,
                 max_tokens=max_output_tokens,
-                thinking={"type": "disabled"},
+                thinking={"type": "enabled", "token_budget": token_budget},
             )
         except Exception as exc:
             status = _value(exc, "status_code", "http_status")
@@ -109,11 +110,20 @@ class CohereJudgeProvider:
             "",
         )
 
-        if not text.strip():
+        cleaned_text = text.strip()
+        if cleaned_text.startswith("```json"):
+            cleaned_text = cleaned_text[7:]
+        elif cleaned_text.startswith("```"):
+            cleaned_text = cleaned_text[3:]
+        if cleaned_text.endswith("```"):
+            cleaned_text = cleaned_text[:-3]
+        cleaned_text = cleaned_text.strip()
+
+        if not cleaned_text:
             raise ProviderError("Cohere response contained no text verdict")
 
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(cleaned_text)
         except json.JSONDecodeError as exc:
             raise ProviderError("Cohere response was not valid JSON") from exc
 
@@ -137,7 +147,7 @@ class CohereJudgeProvider:
             request_id=_value(response, "id", "request_id"),
             prompt_tokens=_value(billed, "input_tokens", "prompt_tokens"),
             completion_tokens=_value(billed, "output_tokens", "completion_tokens"),
-            raw_response_text=text,
+            raw_response_text=cleaned_text,
             latency_seconds=time.perf_counter() - started,
             raw_response=_raw_payload(response),
             brief_reason=parsed.get("brief_reason") if isinstance(parsed, dict) else None,

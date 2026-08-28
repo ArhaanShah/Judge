@@ -21,10 +21,6 @@ class FakeClient:
             message=SimpleNamespace(
                 content=[
                     SimpleNamespace(
-                        type="thinking",
-                        thinking="Compare the candidates.",
-                    ),
-                    SimpleNamespace(
                         type="text",
                         text=(
                             '{"winner":"A",'
@@ -47,7 +43,7 @@ class FakeClient:
         return self.response
 
 
-def test_cohere_provider_uses_structured_schema() -> None:
+def test_cohere_provider_chat_parameters_and_parsing() -> None:
     client = FakeClient()
     provider = CohereJudgeProvider(client=client)
 
@@ -58,10 +54,11 @@ def test_cohere_provider_uses_structured_schema() -> None:
         max_output_tokens=256,
     )
 
-    assert client.kwargs["response_format"] == RESPONSE_FORMAT
     assert client.kwargs["temperature"] == 0
     assert client.kwargs["max_tokens"] == 256
-    assert client.kwargs["thinking"] == {"type": "disabled"}
+    assert client.kwargs["response_format"] == RESPONSE_FORMAT
+    assert client.kwargs["thinking"] == {"type": "enabled", "token_budget": 128}
+    assert "tool_choice" not in client.kwargs
     assert response.raw_response_text.startswith('{"winner":"A"')
     assert response.brief_reason == "A is correct."
 
