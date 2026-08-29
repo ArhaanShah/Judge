@@ -64,6 +64,10 @@ The main stage additionally requires a clean-Git freeze manifest and refuses
 to resume if the condition file changed. Unit tests use mocked providers and
 make zero live requests.
 
+Groq is also supported through `config/pilot_prmbench_groq.yaml`; set
+`GROQ_API_KEY` in the environment or `.env`, then use the same build,
+validate, run, and analyze commands with `--provider groq`.
+
 The adapter first saves the released `classification` distribution. Review
 that output and update `config/prmbench_category_map.yaml` with exact released
 strings if needed; unknown labels always abort. The generated main condition
@@ -106,8 +110,13 @@ prompt supplies all information needed to compare the responses.
 
 - Raw accuracy is the fraction of successfully parsed calls selecting the
   correct candidate.
-- Swap consistency is the fraction of complete AB/BA pairs selecting the same
-  content identity. Raw A/B letters are never compared directly.
+- Swap consistency, also reported as coverage, is the fraction of complete
+  AB/BA pairs selecting the same content identity. Raw A/B letters are never
+  compared directly.
+- Post-filter accuracy is accuracy restricted to swap-consistent pairs; it is
+  undefined when coverage is zero.
+- Reported gap is post-filter accuracy minus raw accuracy and is undefined
+  whenever post-filter accuracy is undefined.
 - Consistent Error Rate (CER) is the fraction of swap-consistent pairs whose
   consistent winner is the flawed response.
 - False Certification Rate (FCR) is the same wrong-given-consistent quantity
