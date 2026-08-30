@@ -1,0 +1,31 @@
+{
+  "git_commit": "c7d89ae4ad1dc64c0c1a7bc4858cf68e0f48638e",
+  "config_sha256": "01c81bf0ffe207405035d5d7f1454c717cf77b37b65fdbab47d867df6a75064e",
+  "dataset_revision": "5cc7683d0ae5797f84d7aeac0607966f277c39e1",
+  "dataset_fingerprint": "57bf6b6e5a57c7c8",
+  "parent_gemini_condition_sha256": "97afc9f46502ea9e9efe45804e4e73cc38481d1f6e34be7f7a0384298891f14a",
+  "nim_16k_subset_sha256": "9d64d695c2f0c0aa304becda482b3a160a2276a4f1489877ea64fe53a1890822",
+  "subset_manifest_sha256": "f816dd56458bf2b1933fb90a50ff1fdb6c0af6a1dd105d9646457ea553be467a",
+  "prompt_sha256": "772bef38a1a9922e31432d8a7e516f7a18a1e9d26185b254500f0505e9cc1004",
+  "provider": "nvidia_nim",
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "max_tokens": 32768,
+  "seed": 20260828,
+  "stream": true,
+  "exact_reasoning_request_json": "{\"reasoning_budget\": 16384, \"reasoning_effort\": \"high\"}",
+  "reasoning_request_sha256": "fe3a03fac7b9546490ee38ab9a26c3051688fc45e979671e5acf750862156176",
+  "output_format_strategy": "provider_schema",
+  "response_schema_sha256_or_suffix_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "preflight_report_sha256": "3b5c153aa65d3b9cd4ba5dc0beccd446cc5902d261fc7ad134284de98830f9a5",
+  "scheduler": {
+    "max_concurrency": 1,
+    "minimum_interval_seconds": 60,
+    "max_transport_retries": 2,
+    "base_backoff_seconds": 120,
+    "hard_attempt_cap": 300
+  },
+  "analysis_code_sha256": "9fa495d7a8f6c9cf81a0a0d9ddf125e0ae921f7eec1ff2117e667844cafd9d60",
+  "timestamp": "2026-08-30T02:46:00.225377+00:00"
+}
