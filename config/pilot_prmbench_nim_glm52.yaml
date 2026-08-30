@@ -1,0 +1,25 @@
+experiment_name: "nim_glm52_robustness"
+seed: 20260828
+
+paths:
+  main_conditions: "data/conditions/16k_subset.jsonl"
+  prompt_template: "config/prompts/judge_template.txt"
+  freeze_manifest: "results/gemini/raw/main_pilot_3/freeze_manifest.json"
+  runs_dir: "results/nim/glm_5_2"
+
+judge:
+  provider: "nvidia_nim"
+  model: "z-ai/glm-5.2"
+  temperature: 0.0
+  max_output_tokens: 16384
+  max_tokens: 16384
+  stream: true
+  reasoning_must_be_verified: true
+  reasoning_effort: "high"
+
+scheduler:
+  max_concurrency: 1
+  minimum_interval_seconds: 60
+  max_transport_retries: 2
+  base_backoff_seconds: 120
+  hard_attempt_cap: 300

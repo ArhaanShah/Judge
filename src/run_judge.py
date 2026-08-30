@@ -79,6 +79,8 @@ def _prepare_run(
             for name, value in current_fingerprint.items()
             if existing.get(name) != value
         ]
+        if existing.get("provider") != judge["provider"] or existing.get("model") != judge["model"]:
+            mismatches.append("provider/model (no mid-run failover allowed)")
         if mismatches:
             raise RuntimeError(
                 "refusing to resume with changed inputs: "
@@ -286,6 +288,8 @@ def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_conf
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("conditions_hash") != fingerprint:
             raise RuntimeError("refusing to resume with changed conditions")
+        if manifest.get("model") != judge_config["model"] or manifest.get("provider") != judge_config["provider"]:
+            raise RuntimeError("no mid-run model failover allowed: resuming a run requires the exact same model and provider")
     else:
         write_json(manifest_path, {"run_id": run_id, "split": split, "created_at": utc_now(), "git_commit": git_commit(), "conditions_hash": fingerprint, "config": config, "provider": judge_config["provider"], "model": judge_config["model"]})
     conditions = list(read_jsonl(conditions_path))
@@ -302,10 +306,24 @@ def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_conf
     requested = _existing_ids(requests_path)
     provider = make_provider(judge_config)
     template = load_prompt_template(paths["prompt_template"])
-    retries = int(judge_config.get("max_transport_retries", 0))
-    cap = int(require_mapping(config.get("budget"), "budget")["hard_api_call_cap"])
+    scheduler_config = config.get("scheduler", {})
+    retries = int(scheduler_config.get("max_transport_retries", judge_config.get("max_transport_retries", 0)))
+    budget_map = config.get("budget")
+    cap_val = scheduler_config.get("hard_attempt_cap")
+    if cap_val is not None:
+        cap = int(cap_val)
+    else:
+        cap = int(require_mapping(budget_map, "budget")["hard_api_call_cap"])
     counter_path = Path(paths["runs_dir"]) / "api_call_counter.json"
-    minimum_interval = 60.0 / float(judge_config.get("max_requests_per_minute", 15))
+    
+    # Calculate minimum interval from scheduler or max_requests_per_minute
+    if "minimum_interval_seconds" in scheduler_config:
+        minimum_interval = float(scheduler_config["minimum_interval_seconds"])
+    else:
+        minimum_interval = 60.0 / float(judge_config.get("max_requests_per_minute", 15))
+        
+    base_backoff_seconds = float(scheduler_config.get("base_backoff_seconds", 1.0))
+    
     last_attempt_at = 0.0
     for number, condition in enumerate(conditions, start=1):
         condition_id = str(condition["condition_id"])
@@ -327,17 +345,17 @@ def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_conf
             _increment_counter(counter_path, cap)
             last_attempt_at = time.monotonic()
             try:
-                result = provider.judge(prompt, model=str(judge_config["model"]), temperature=float(judge_config["temperature"]), max_output_tokens=int(judge_config["max_output_tokens"]))
+                result = provider.judge(prompt, model=str(judge_config["model"]), temperature=float(judge_config.get("temperature", 0.0)), max_output_tokens=int(judge_config.get("max_output_tokens", 2048)))
                 break
             except RetriableProviderError as exc:
                 error_status = str(exc)
                 if attempt < retries:
                     retry_after = getattr(exc, "retry_after", None)
-                    time.sleep(float(retry_after) if retry_after else min(2 ** attempt, 30))
+                    time.sleep(float(retry_after) if retry_after else base_backoff_seconds * (2 ** attempt))
             except ProviderError as exc:
                 error_status = str(exc)
                 if attempt < retries:
-                    time.sleep(min(2 ** attempt, 30))
+                    time.sleep(base_backoff_seconds * (2 ** attempt))
         base = {
             "run_id": run_id,
             "condition_id": condition_id,
@@ -352,7 +370,15 @@ def run_prmbench(config_path: str | Path, run_id: str, split: str, *, trial_conf
         if result:
             result_data = result.to_dict()
             try:
-                structured = json.loads(result.raw_response_text)
+                raw_text = result.raw_response_text.strip()
+                if raw_text.startswith("```json"):
+                    raw_text = raw_text[7:]
+                elif raw_text.startswith("```"):
+                    raw_text = raw_text[3:]
+                if raw_text.endswith("```"):
+                    raw_text = raw_text[:-3]
+                raw_text = raw_text.strip()
+                structured = json.loads(raw_text)
             except json.JSONDecodeError:
                 structured = {}
             display = structured.get("winner") if isinstance(structured, dict) and structured.get("winner") in ("A", "B", "tie") else None

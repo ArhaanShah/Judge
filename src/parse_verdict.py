@@ -16,8 +16,17 @@ VERDICT_PATTERN = re.compile(r"^VERDICT:\s*([AB])\s*$", re.MULTILINE)
 
 
 def parse_display_verdict(text: str) -> tuple[DisplayVerdict | None, str]:
+    cleaned = text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
     try:
-        value = json.loads(text)
+        value = json.loads(cleaned)
         if isinstance(value, dict) and value.get("winner") in ("A", "B", "tie"):
             return value["winner"], "ok"
     except (json.JSONDecodeError, TypeError):
@@ -59,7 +68,15 @@ def parse_prmbench_record(condition: dict[str, Any], response: dict[str, Any]) -
     content = map_prmbench_content_verdict(str(condition["candidate_order"]), display) if display else None
     reason = None
     try:
-        payload = json.loads(str(response.get("raw_response_text", "")))
+        raw = str(response.get("raw_response_text", "")).strip()
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        elif raw.startswith("```"):
+            raw = raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        raw = raw.strip()
+        payload = json.loads(raw)
         reason = payload.get("brief_reason") if isinstance(payload, dict) else None
     except json.JSONDecodeError:
         pass

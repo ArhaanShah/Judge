@@ -25,4 +25,10 @@ def make_provider(judge_config: dict[str, Any]) -> JudgeProvider:
         return GeminiJudgeProvider(
             timeout_seconds=float(judge_config.get("timeout_seconds", 120))
         )
+    if name in ("nvidia_nim", "nim", "nvidia"):
+        from .nvidia_nim_provider import NvidiaNimProvider
+        return NvidiaNimProvider(
+            config=judge_config,
+            timeout_seconds=float(judge_config.get("timeout_seconds", 120))
+        )
     raise ValueError(f"unsupported judge provider: {name}")

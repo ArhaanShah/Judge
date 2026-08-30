@@ -1,0 +1,7 @@
+length,internal_position,n_pairs,n_calls,raw_accuracy,position_consistency,certification_coverage,n_certified,n_certified_correct,n_certified_wrong,selective_risk,selective_risk_exact_ci,certified_correct,certified_correct_fraction,certified_wrong,certified_wrong_fraction,stable_tie,stable_tie_fraction,mixed_tie,mixed_tie_fraction,order_disagreement,order_disagreement_fraction,rejection_rate,tie_involved_fraction,pure_order_disagreement_fraction,tie_share_of_noncertification
+4K,early,40,80,0.6375,0.5,0.425,17,16,1,0.058823529411764705,"[0.001488174391266639, 0.2868893966672207]",16,0.4,1,0.025,3,0.075,15,0.375,5,0.125,0.575,0.45,0.125,0.782608695652174
+4K,middle,40,80,0.725,0.675,0.6,24,23,1,0.041666666666666664,"[0.0010543524454697528, 0.21120168345697315]",23,0.575,1,0.025,3,0.075,8,0.2,5,0.125,0.4,0.275,0.125,0.6875
+4K,late,40,80,0.8,0.8,0.725,29,28,1,0.034482758620689655,"[0.0008726468835799639, 0.1776442954887229]",28,0.7,1,0.025,3,0.075,3,0.075,5,0.125,0.275,0.15,0.125,0.5454545454545454
+16K,early,40,80,0.45,0.6,0.275,11,11,0,0.0,"[0.0, 0.28491415291815436]",11,0.275,0,0.0,13,0.325,9,0.225,7,0.175,0.725,0.55,0.175,0.7586206896551724
+16K,middle,40,80,0.3125,0.6,0.15,6,6,0,0.0,"[0.0, 0.4592581264399004]",6,0.15,0,0.0,18,0.45,14,0.35,2,0.05,0.85,0.8,0.05,0.9411764705882353
+16K,late,40,80,0.5375,0.45,0.275,11,11,0,0.0,"[0.0, 0.28491415291815436]",11,0.275,0,0.0,7,0.175,15,0.375,7,0.175,0.725,0.55,0.175,0.7586206896551724

@@ -1,0 +1,178 @@
+{
+  "bootstrap": {
+    "confidence": 0.95,
+    "method": "packet_cluster_percentile",
+    "n_resamples": 10000,
+    "seed": 20260828
+  },
+  "candidate_order_robustness": {
+    "clean_first": {
+      "bootstrap_95_ci": {
+        "high": 0.4125,
+        "low": 0.050000000000000044,
+        "valid_draws": 10000
+      },
+      "interaction": 0.22500000000000003,
+      "middle_penalty_by_length": {
+        "16K": 0.22500000000000003,
+        "4K": 0.0
+      }
+    },
+    "flawed_first": {
+      "bootstrap_95_ci": {
+        "high": 0.32499999999999996,
+        "low": -0.03749999999999998,
+        "valid_draws": 10000
+      },
+      "interaction": 0.15000000000000008,
+      "middle_penalty_by_length": {
+        "16K": 0.1375,
+        "4K": -0.012500000000000067
+      }
+    }
+  },
+  "certification_coverage": {
+    "bootstrap_95_ci": {
+      "high": 0.35,
+      "low": -0.04999999999999996,
+      "valid_draws": 10000
+    },
+    "by_length": {
+      "16K": {
+        "edge": 0.275,
+        "middle": 0.15,
+        "middle_penalty": 0.12500000000000003
+      },
+      "4K": {
+        "edge": 0.575,
+        "middle": 0.6,
+        "middle_penalty": -0.025000000000000022
+      }
+    },
+    "interaction": 0.15000000000000005
+  },
+  "position_consistency": {
+    "bootstrap_95_ci": {
+      "high": 0.20000000000000007,
+      "low": -0.30000000000000004,
+      "valid_draws": 10000
+    },
+    "by_length": {
+      "16K": {
+        "edge": 0.525,
+        "middle": 0.6,
+        "middle_penalty": -0.07499999999999996
+      },
+      "4K": {
+        "edge": 0.65,
+        "middle": 0.675,
+        "middle_penalty": -0.025000000000000022
+      }
+    },
+    "interaction": -0.04999999999999993
+  },
+  "raw_accuracy": {
+    "bootstrap_95_ci": {
+      "high": 0.3062500000000001,
+      "low": 0.06250000000000006,
+      "valid_draws": 10000
+    },
+    "by_length": {
+      "16K": {
+        "edge": 0.49375,
+        "middle": 0.3125,
+        "middle_penalty": 0.18125000000000002
+      },
+      "4K": {
+        "edge": 0.71875,
+        "middle": 0.725,
+        "middle_penalty": -0.006249999999999978
+      }
+    },
+    "interaction": 0.1875
+  },
+  "selection_diagnostic": {
+    "certified_pairs": {
+      "n_calls": 196,
+      "raw_accuracy": 0.9693877551020408
+    },
+    "rejected_pairs": {
+      "n_calls": 284,
+      "raw_accuracy": 0.30633802816901406
+    }
+  },
+  "tokenizer_independent_position_check": {
+    "16K": {
+      "character_midpoint_fraction": {
+        "passed": true,
+        "ranges": {
+          "early": [
+            0.13547525708766547,
+            0.17964233168245022
+          ],
+          "late": [
+            0.8253240362669347,
+            0.8737437309469958
+          ],
+          "middle": [
+            0.4792614527769062,
+            0.553751597993903
+          ]
+        }
+      },
+      "whitespace_midpoint_fraction": {
+        "passed": true,
+        "ranges": {
+          "early": [
+            0.14021309314586994,
+            0.19318604939803896
+          ],
+          "late": [
+            0.8185916179337231,
+            0.8787586944890315
+          ],
+          "middle": [
+            0.45674227744215207,
+            0.5696187111706663
+          ]
+        }
+      }
+    },
+    "4K": {
+      "character_midpoint_fraction": {
+        "passed": true,
+        "ranges": {
+          "early": [
+            0.11280511888774784,
+            0.19637159605253396
+          ],
+          "late": [
+            0.7558157568238213,
+            0.892718944957751
+          ],
+          "middle": [
+            0.45516471674876846,
+            0.5352018816150529
+          ]
+        }
+      },
+      "whitespace_midpoint_fraction": {
+        "passed": true,
+        "ranges": {
+          "early": [
+            0.10222121486854034,
+            0.19193154034229828
+          ],
+          "late": [
+            0.7433074265975821,
+            0.9142657992565055
+          ],
+          "middle": [
+            0.45083487940630795,
+            0.5867106503298775
+          ]
+        }
+      }
+    }
+  }
+}

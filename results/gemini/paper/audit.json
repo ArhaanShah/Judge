@@ -1,0 +1,34 @@
+{
+  "checks": {
+    "condition_hash_matches": true,
+    "exactly_240_complete_pairs": true,
+    "exactly_40_packets": true,
+    "exactly_480_completed_conditions": true,
+    "forty_pairs_per_cell": true,
+    "no_duplicate_condition_ids": true,
+    "no_incomplete_pairs": true,
+    "no_incomplete_responses": true,
+    "parse_success_100_percent": true,
+    "prompt_hash_matches": true,
+    "single_returned_model": true,
+    "verdict_metadata_present": true
+  },
+  "condition_hash": "97afc9f46502ea9e9efe45804e4e73cc38481d1f6e34be7f7a0384298891f14a",
+  "configured_model": "gemini-3.5-flash-lite",
+  "duplicate_count": 0,
+  "git_sha": "b9f5c8bf34531df538dd51cb3663dccffbfa670b",
+  "incomplete_pair_count": 0,
+  "incomplete_response_count": 0,
+  "missing_prompt_token_metadata": 0,
+  "n_calls": 480,
+  "n_packets": 40,
+  "n_pairs": 240,
+  "parse_rate": 1.0,
+  "passed": true,
+  "prompt_hash": "772bef38a1a9922e31432d8a7e516f7a18a1e9d26185b254500f0505e9cc1004",
+  "provider_error_count": 0,
+  "returned_model_ids": [
+    "gemini-3.5-flash-lite"
+  ],
+  "run_id": "main_pilot_3"
+}

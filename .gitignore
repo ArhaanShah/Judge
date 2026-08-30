@@ -15,7 +15,6 @@ htmlcov/
 build/
 dist/
 *.egg-info/
-docs/
 
 # Local tooling and editor files
 .mypy_cache/
