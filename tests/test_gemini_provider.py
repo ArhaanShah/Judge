@@ -88,10 +88,16 @@ def test_gemini_provider_parameters_and_parsing() -> None:
     assert models.kwargs["model"] == "gemini-3.5-flash-lite"
     assert models.kwargs["contents"] == "prompt text"
     config = models.kwargs["config"]
-    assert config.temperature == 0.0
-    assert config.max_output_tokens == 256
-    assert config.response_mime_type == "application/json"
-    assert config.response_schema == RESPONSE_SCHEMA
+    if isinstance(config, dict):
+        assert config["temperature"] == 0.0
+        assert config["max_output_tokens"] == 256
+        assert config["response_mime_type"] == "application/json"
+        assert config["response_schema"] == RESPONSE_SCHEMA
+    else:
+        assert config.temperature == 0.0
+        assert config.max_output_tokens == 256
+        assert config.response_mime_type == "application/json"
+        assert config.response_schema == RESPONSE_SCHEMA
 
     assert response.provider == "gemini"
     assert response.requested_model == "gemini-3.5-flash-lite"

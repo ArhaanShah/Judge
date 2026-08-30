@@ -21,6 +21,7 @@ class NIMModelProfile:
         self.reasoning_budget = config.get("reasoning_budget")
         self.extra_body = config.get("extra_body", {})
         self.reasoning_must_be_verified = config.get("reasoning_must_be_verified", False)
+        self.response_format = config.get("response_format")
 
 
 class NvidiaNimProvider(JudgeProvider):
@@ -68,6 +69,8 @@ class NvidiaNimProvider(JudgeProvider):
             payload["reasoning_effort"] = self.profile.reasoning_effort
         if self.profile.reasoning_budget is not None:
             payload["reasoning_budget"] = self.profile.reasoning_budget
+        if self.profile.response_format is not None:
+            payload["response_format"] = self.profile.response_format
             
         if self.profile.extra_body:
             payload.update(self.profile.extra_body)
@@ -85,12 +88,32 @@ class NvidiaNimProvider(JudgeProvider):
         except httpx.NetworkError as e:
             raise RetriableProviderError(f"Network error: {e}")
 
+    def _extract_rate_limit_headers(self, headers: httpx.Headers) -> dict:
+        rl_headers = {}
+        for k, v in headers.items():
+            k_lower = k.lower()
+            if k_lower.startswith("x-ratelimit-") or k_lower == "retry-after":
+                rl_headers[k_lower] = v
+        return rl_headers
+
+    def _raise_retriable(self, msg: str, headers: httpx.Headers = None):
+        err = RetriableProviderError(msg)
+        if headers:
+            rl = self._extract_rate_limit_headers(headers)
+            err.response_headers = rl
+            if "retry-after" in rl:
+                try:
+                    err.retry_after = float(rl["retry-after"])
+                except ValueError:
+                    pass
+        raise err
+
     def _handle_sync(self, client: httpx.Client, payload: dict, headers: dict, start_time: float) -> JudgeResponse:
         response = client.post(self.base_url, json=payload, headers=headers)
         latency = time.time() - start_time
         
         if response.status_code in (429, 500, 502, 503, 504):
-            raise RetriableProviderError(f"HTTP {response.status_code}: {response.text}")
+            self._raise_retriable(f"HTTP {response.status_code}: {response.text}", response.headers)
         if response.status_code != 200:
             raise ProviderError(f"HTTP {response.status_code}: {response.text}")
             
@@ -101,10 +124,12 @@ class NvidiaNimProvider(JudgeProvider):
         reasoning_content = message.get("reasoning_content", "")
         finish_reason = data["choices"][0].get("finish_reason")
         usage = data.get("usage", {})
+        returned_model = data.get("model")
+        request_id = data.get("id") or response.headers.get("x-request-id")
         
         return self._build_response(
             payload, response.headers, latency, final_content, reasoning_content,
-            usage, finish_reason, response.status_code
+            usage, finish_reason, response.status_code, returned_model, request_id
         )
 
     def _handle_stream(self, client: httpx.Client, payload: dict, headers: dict, start_time: float) -> JudgeResponse:
@@ -112,12 +137,16 @@ class NvidiaNimProvider(JudgeProvider):
         reasoning_content = ""
         finish_reason = None
         usage = {}
+        returned_model = None
+        request_id = None
+        response_headers = httpx.Headers()
         
         try:
             with client.stream("POST", self.base_url, json=payload, headers=headers) as response:
+                response_headers = response.headers
                 if response.status_code in (429, 500, 502, 503, 504):
                     response.read()
-                    raise RetriableProviderError(f"HTTP {response.status_code}: {response.text}")
+                    self._raise_retriable(f"HTTP {response.status_code}: {response.text}", response.headers)
                 if response.status_code != 200:
                     response.read()
                     raise ProviderError(f"HTTP {response.status_code}: {response.text}")
@@ -133,6 +162,11 @@ class NvidiaNimProvider(JudgeProvider):
                         chunk = json.loads(data_str)
                     except json.JSONDecodeError:
                         continue
+                        
+                    if returned_model is None and chunk.get("model"):
+                        returned_model = chunk["model"]
+                    if request_id is None and chunk.get("id"):
+                        request_id = chunk["id"]
                         
                     if chunk.get("usage"):
                         usage = chunk["usage"]
@@ -151,15 +185,17 @@ class NvidiaNimProvider(JudgeProvider):
             raise RetriableProviderError(f"Stream read error: {e}")
             
         latency = time.time() - start_time
+        if request_id is None:
+            request_id = response_headers.get("x-request-id")
         return self._build_response(
-            payload, response.headers, latency, final_content, reasoning_content,
-            usage, finish_reason, response.status_code
+            payload, response_headers, latency, final_content, reasoning_content,
+            usage, finish_reason, response.status_code, returned_model, request_id
         )
 
     def _build_response(
         self, payload: dict, headers: httpx.Headers, latency: float, 
         final_content: str, reasoning_content: str, usage: dict, 
-        finish_reason: str, status_code: int
+        finish_reason: str, status_code: int, returned_model: str, request_id: str
     ) -> JudgeResponse:
     
         raw_response = {
@@ -168,21 +204,38 @@ class NvidiaNimProvider(JudgeProvider):
             "reasoning_sha256": hashlib.sha256(reasoning_content.encode("utf-8")).hexdigest() if reasoning_content else None,
             "reasoning_tokens_if_reported": usage.get("completion_tokens_details", {}).get("reasoning_tokens"),
             "finish_reason": finish_reason,
-            "retry_after": headers.get("retry-after"),
-            "x_ratelimit_limit": headers.get("x-ratelimit-limit"),
-            "x_ratelimit_remaining": headers.get("x-ratelimit-remaining"),
-            "x_ratelimit_reset": headers.get("x-ratelimit-reset"),
+            "usage": usage,
         }
         
+        raw_response.update(self._extract_rate_limit_headers(headers))
+        
+        # parse winner and brief_reason
+        cleaned_text = str(final_content or "").strip()
+        if cleaned_text.startswith("```json"):
+            cleaned_text = cleaned_text[7:]
+        elif cleaned_text.startswith("```"):
+            cleaned_text = cleaned_text[3:]
+        if cleaned_text.endswith("```"):
+            cleaned_text = cleaned_text[:-3]
+        cleaned_text = cleaned_text.strip()
+        
+        brief_reason = None
+        try:
+            parsed = json.loads(cleaned_text)
+            brief_reason = parsed.get("brief_reason")
+        except Exception:
+            pass
+            
         return JudgeResponse(
             provider=self.name,
             requested_model=payload["model"],
-            returned_model=None, # Not explicitly available in standard response chunk outside of 'model'
-            request_id=headers.get("x-request-id"),
+            returned_model=returned_model,
+            request_id=request_id,
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
             raw_response_text=final_content,
             latency_seconds=latency,
             raw_response=raw_response,
-            http_status=status_code
+            http_status=status_code,
+            brief_reason=brief_reason
         )

@@ -39,9 +39,14 @@ python -m pytest  # Run all tests
    ```
 
 ## Important Notes
-- Live stages require `COHERE_API_KEY` present, explicit confirmation of trial/evaluation use, and ≥800 free calls
+- Live stages require `GEMINI_API_KEY`, explicit confirmation of trial/evaluation use, and ≥800 free calls
 - Unit tests use mocked providers and make zero live requests
-- Validation is a hard gate before judge calls (re-run immediately before)
+- Gemini is primary paper evidence
+- NIM is post-hoc robustness only
+- GLM requires successful reasoning-control preflight
+- Nemotron is fallback selected before main
+- no request-level model fallback
+- no NIM main without ELIGIBLE preflight + freeze
 - `run_judge` randomizes call order using saved seed, writes requests before sending, saves responses immediately, and resumes partially completed runs
 - Choose new run ID for genuinely new runs
 - Analysis writes to `results/` directory: summary CSV, Markdown tables, `go_kill.json`, and figures

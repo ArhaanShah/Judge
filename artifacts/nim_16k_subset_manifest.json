@@ -1,0 +1,10 @@
+{
+  "parent_full_condition_sha256": "97afc9f46502ea9e9efe45804e4e73cc38481d1f6e34be7f7a0384298891f14a",
+  "subset_sha256": "9d64d695c2f0c0aa304becda482b3a160a2276a4f1489877ea64fe53a1890822",
+  "n_conditions": 240,
+  "n_packets": 40,
+  "n_pairs": 120,
+  "source_gemini_freeze_manifest_sha256": "233ea5a4bcc87bbebc11a79dac5865c93128bea7a62faae62c1e1581dafd5df5",
+  "generation_code_sha256": "d37d48fb3441b177745ecd2aefe15e6c06cd99ece63b730e4553da59cc7c1585",
+  "timestamp": "2026-08-30T01:55:34.990201+00:00"
+}

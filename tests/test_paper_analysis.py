@@ -103,20 +103,26 @@ def test_position_consistency_interaction_formula():
     assert abs(interactions["position_consistency"]["interaction"] - 0.3) < 1e-7
 
 def test_packet_bootstrap_preserves_cluster():
-    # If we bootstrap by packet, all positions for a given packet should be selected together.
-    # We can test this by checking if the lengths are consistent.
     dummy_parsed = []
     dummy_pairs = []
-    for length in ("4K", "16K"):
-        for pos in ("early", "middle", "late"):
-            for order in ("clean_first", "flawed_first"):
-                for item_id in range(40):
-                    dummy_parsed.append({"item_id": str(item_id), "context_length": length, "internal_position": pos, "parse_status": "ok", "is_correct": True, "candidate_order": order})
-                    if order == "clean_first":
-                        dummy_pairs.append({"item_id": str(item_id), "context_length": length, "internal_position": pos, "parse_ok": True, "decisively_certified": True, "position_consistent": True, "pair_outcome": "certified_correct", "pair_complete": True})
+    
+    # Packet 0: 100% accurate in early, middle, late
+    for pos in ("early", "middle", "late"):
+        dummy_parsed.append({"item_id": "0", "context_length": "16K", "internal_position": pos, "parse_status": "ok", "is_correct": True, "candidate_order": "clean_first"})
+        dummy_pairs.append({"item_id": "0", "context_length": "16K", "internal_position": pos, "parse_ok": True, "decisively_certified": True, "position_consistent": True, "pair_outcome": "certified_correct", "pair_complete": True})
+        
+    # Packet 1: 0% accurate in early, middle, late
+    for pos in ("early", "middle", "late"):
+        dummy_parsed.append({"item_id": "1", "context_length": "16K", "internal_position": pos, "parse_status": "ok", "is_correct": False, "candidate_order": "clean_first"})
+        dummy_pairs.append({"item_id": "1", "context_length": "16K", "internal_position": pos, "parse_ok": True, "decisively_certified": False, "position_consistent": False, "pair_outcome": "certified_wrong", "pair_complete": True})
 
-    b1 = packet_bootstrap(dummy_parsed, dummy_pairs, n_resamples=10, seed=42)
-    assert "cells.16K.middle.raw_accuracy" in b1
+    b1 = packet_bootstrap(dummy_parsed, dummy_pairs, n_resamples=50, seed=42)
+
+    # Under packet bootstrap, the early and middle accuracy will always be identical in every draw,
+    # so their resulting confidence intervals must be identical.
+    assert b1["cells.16K.early.raw_accuracy"] == b1["cells.16K.middle.raw_accuracy"]
+    assert b1["cells.16K.early.raw_accuracy"]["low"] >= 0.0
+    assert b1["cells.16K.early.raw_accuracy"]["high"] <= 1.0
 
 def test_bootstrap_interaction_reproducible_with_seed():
     dummy_parsed = []
@@ -149,11 +155,18 @@ def test_tokenizer_independent_position_ordering():
     conditions = []
     responses = []
     for length in ("4K", "16K"):
-        conditions.append({"condition_id": len(conditions), "clean_candidate_text": "A\n\nB", "target_index": 0, "length": length, "internal_position": "early"})
-        conditions.append({"condition_id": len(conditions), "clean_candidate_text": "A\n\nB\n\nC", "target_index": 1, "length": length, "internal_position": "middle"})
-        conditions.append({"condition_id": len(conditions), "clean_candidate_text": "A\n\nB", "target_index": 1, "length": length, "internal_position": "late"})
-        for _ in range(3):
-            responses.append({"condition_id": len(responses) - 3, "prompt_tokens": 10})
+        # early
+        c_id_early = f"{length}_early"
+        conditions.append({"condition_id": c_id_early, "clean_candidate_text": "A\n\nB", "target_index": 0, "length": length, "internal_position": "early"})
+        responses.append({"condition_id": c_id_early, "prompt_tokens": 10})
+        # middle
+        c_id_middle = f"{length}_middle"
+        conditions.append({"condition_id": c_id_middle, "clean_candidate_text": "A\n\nB\n\nC", "target_index": 1, "length": length, "internal_position": "middle"})
+        responses.append({"condition_id": c_id_middle, "prompt_tokens": 10})
+        # late
+        c_id_late = f"{length}_late"
+        conditions.append({"condition_id": c_id_late, "clean_candidate_text": "A\n\nB", "target_index": 1, "length": length, "internal_position": "late"})
+        responses.append({"condition_id": c_id_late, "prompt_tokens": 10})
     
     rows, passed, sep = native_token_rows(conditions, responses)
     assert passed

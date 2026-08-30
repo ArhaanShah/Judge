@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.run_judge import _increment_counter, provider_preflight
+from src.attempt_budget import AttemptBudget
+from src.run_judge import provider_preflight
 
 
 def test_persistent_counter_aborts_before_call_801(tmp_path) -> None:
     path = tmp_path / "counter.json"
-    path.write_text(json.dumps({"api_calls": 799}), encoding="utf-8")
-    assert _increment_counter(path, 800) == 800
+    budget = AttemptBudget(path, 800, "test_model", "test_hash")
+    path.write_text(json.dumps({"api_attempts": 799}), encoding="utf-8")
+    assert budget.increment() == 800
     with pytest.raises(RuntimeError, match="cap"):
-        _increment_counter(path, 800)
+        budget.increment()
 
 
 def test_preflight_requires_operator_confirmation(monkeypatch) -> None:

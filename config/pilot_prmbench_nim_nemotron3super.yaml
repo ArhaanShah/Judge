@@ -2,22 +2,44 @@ experiment_name: "nim_nemotron3super_robustness"
 seed: 20260828
 
 paths:
-  main_conditions: "data/conditions/16k_subset.jsonl"
-  prompt_template: "config/prompts/judge_template.txt"
-  freeze_manifest: "results/gemini/raw/main_pilot_3/freeze_manifest.json"
-  runs_dir: "results/nim/nemotron_3_super"
+  source_rows: data/source/prmbench_rows.jsonl
+  source_manifest: data/source/prmbench_manifest.json
+
+  main_conditions: data/processed/pilot_conditions_16k.jsonl
+  main_validation_report: data/processed/main_validation_report_nim_nemotron3super.json
+
+  prompt_template: config/prompts/pairwise_judge.txt
+
+  subset_manifest: artifacts/nim_16k_subset_manifest.json
+  freeze_manifest: artifacts/nim_nemotron3super_freeze_manifest.json
+  preflight_report: results/nim/nemotron3super/preflight.json
+  attempt_counter: results/nim/nemotron3super/api_attempt_counter.json
+
+  runs_dir: results/nim/nemotron3super/raw
+  results_dir: results/nim/nemotron3super/paper
+
+tokenizer: CohereLabs/command-a-plus-05-2026-w4a4
+
+lengths:
+  16K:
+    target: 16000
+    min: 15200
+    max: 16800
+
+positions:
+  early:  {target: 0.15, min: 0.10, max: 0.20}
+  middle: {target: 0.50, min: 0.45, max: 0.55}
+  late:   {target: 0.85, min: 0.80, max: 0.90}
 
 judge:
   provider: "nvidia_nim"
   model: "nvidia/nemotron-3-super-120b-a12b"
   temperature: 1.0
   top_p: 0.95
-  max_output_tokens: 32768
   max_tokens: 32768
+  stream: true
   reasoning_effort: "high"
   reasoning_budget: 16384
-  stream: true
-  reasoning_must_be_verified: true
 
 scheduler:
   max_concurrency: 1

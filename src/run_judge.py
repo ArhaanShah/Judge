@@ -29,6 +29,7 @@ from .utils import (
 )
 from .validate_conditions import validate_from_config
 from .validate_conditions import validate_prmbench_from_config
+from .attempt_budget import AttemptBudget
 
 
 def utc_now() -> str:
@@ -166,7 +167,10 @@ def run(config_path: str | Path, run_id: str) -> Path:
             except RetriableProviderError as exc:
                 last_error = str(exc)
                 if attempt < retries:
-                    time.sleep(min(2**attempt, 30))
+                    retry_after = getattr(exc, "retry_after", None)
+                    time.sleep(
+                        float(retry_after) if retry_after else min(120.0 * (2**attempt), 300)
+                    )
             except ProviderError as exc:
                 last_error = str(exc)
                 break
@@ -214,6 +218,9 @@ def provider_preflight(
         "google": "GEMINI_API_KEY",
         "groq": "GROQ_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "nvidia_nim": "NVIDIA_API_KEY",
+        "nim": "NVIDIA_API_KEY",
+        "nvidia": "NVIDIA_API_KEY",
     }
     env_var = env_var_map.get(provider, f"{provider.upper()}_API_KEY")
     required = int(budget["required_available_calls"])
@@ -238,20 +245,7 @@ def provider_preflight(
         raise RuntimeError(f"available free call budget must be at least {required}")
 
 
-def _counter_value(path: Path) -> int:
-    if not path.exists():
-        return 0
-    value = json.loads(path.read_text(encoding="utf-8"))
-    return int(value.get("api_calls", 0))
 
-
-def _increment_counter(path: Path, cap: int) -> int:
-    current = _counter_value(path)
-    if current >= cap:
-        raise RuntimeError(f"hard API-call cap of {cap} reached; request not sent")
-    current += 1
-    write_json(path, {"api_calls": current, "updated_at": utc_now()})
-    return current
 
 
 def run_prmbench(
@@ -276,22 +270,40 @@ def run_prmbench(
         if not freeze_path.exists():
             raise RuntimeError("main pilot is not frozen")
         frozen = json.loads(freeze_path.read_text(encoding="utf-8"))
-        if frozen.get("condition_file_sha256") != sha256_file(paths["main_conditions"]):
-            raise RuntimeError("main condition file changed after freeze")
-        source_manifest = json.loads(
-            Path(paths["source_manifest"]).read_text(encoding="utf-8")
-        )
-        frozen_checks = {
-            "prompt": frozen.get("prompt_sha256")
-            == sha256_file(paths["prompt_template"]),
-            "provider": frozen.get("provider") == config["judge"]["provider"],
-            "model": frozen.get("model_id") == config["judge"]["model"],
-            "dataset revision": frozen.get("dataset_revision")
-            == source_manifest.get("revision"),
-            "dataset fingerprint": frozen.get("dataset_fingerprint")
-            == source_manifest.get("dataset_fingerprint"),
-            "Git commit": frozen.get("git_commit") == git_commit(),
-        }
+        
+        # NIM specific gates
+        if config["experiment_name"].startswith("nim"):
+            preflight_path = Path(paths.get("preflight_report", ""))
+            if not preflight_path.exists():
+                raise RuntimeError("NIM main run requires preflight report")
+            preflight = json.loads(preflight_path.read_text())
+            if preflight.get("status") != "ELIGIBLE":
+                raise RuntimeError(f"NIM main run requires ELIGIBLE preflight status, got {preflight.get('status')}")
+                
+            frozen_checks = {
+                "config": frozen.get("config_sha256") == sha256_file(config_path),
+                "subset": frozen.get("nim_16k_subset_sha256") == sha256_file(paths["main_conditions"]),
+                "prompt": frozen.get("prompt_sha256") == sha256_file(paths["prompt_template"]),
+                "preflight": frozen.get("preflight_report_sha256") == sha256_file(preflight_path),
+            }
+        else:
+            if frozen.get("condition_file_sha256") != sha256_file(paths["main_conditions"]):
+                raise RuntimeError("main condition file changed after freeze")
+            source_manifest = json.loads(
+                Path(paths["source_manifest"]).read_text(encoding="utf-8")
+            )
+            frozen_checks = {
+                "prompt": frozen.get("prompt_sha256")
+                == sha256_file(paths["prompt_template"]),
+                "provider": frozen.get("provider") == config["judge"]["provider"],
+                "model": frozen.get("model_id") == config["judge"]["model"],
+                "dataset revision": frozen.get("dataset_revision")
+                == source_manifest.get("revision"),
+                "dataset fingerprint": frozen.get("dataset_fingerprint")
+                == source_manifest.get("dataset_fingerprint"),
+                "Git commit": frozen.get("git_commit") == git_commit(),
+            }
+        
         changed = [name for name, passed in frozen_checks.items() if not passed]
         if changed:
             raise RuntimeError(
@@ -314,20 +326,35 @@ def run_prmbench(
             raise RuntimeError("refusing to resume with changed conditions")
         if manifest.get("model") != judge_config["model"] or manifest.get("provider") != judge_config["provider"]:
             raise RuntimeError("no mid-run model failover allowed: resuming a run requires the exact same model and provider")
+        if config["experiment_name"].startswith("nim"):
+            nim_fingerprints = {
+                "config_sha256": sha256_file(config_path),
+                "prompt_sha256": sha256_file(paths["prompt_template"]),
+                "subset_sha256": fingerprint,
+                "freeze_manifest_sha256": sha256_file(paths["freeze_manifest"]),
+            }
+            for k, v in nim_fingerprints.items():
+                if manifest.get(k) != v:
+                    raise RuntimeError(f"refusing to resume: {k} changed")
     else:
-        write_json(
-            manifest_path,
-            {
-                "run_id": run_id,
-                "split": split,
-                "created_at": utc_now(),
-                "git_commit": git_commit(),
-                "conditions_hash": fingerprint,
-                "config": config,
-                "provider": judge_config["provider"],
-                "model": judge_config["model"],
-            },
-        )
+        manifest_data = {
+            "run_id": run_id,
+            "split": split,
+            "created_at": utc_now(),
+            "git_commit": git_commit(),
+            "conditions_hash": fingerprint,
+            "config": config,
+            "provider": judge_config["provider"],
+            "model": judge_config["model"],
+        }
+        if config["experiment_name"].startswith("nim"):
+            manifest_data.update({
+                "config_sha256": sha256_file(config_path),
+                "prompt_sha256": sha256_file(paths["prompt_template"]),
+                "subset_sha256": fingerprint,
+                "freeze_manifest_sha256": sha256_file(paths["freeze_manifest"]),
+            })
+        write_json(manifest_path, manifest_data)
     conditions = list(read_jsonl(conditions_path))
     random.Random(int(config["seed"])).shuffle(conditions)
     if condition_id:
@@ -348,13 +375,17 @@ def run_prmbench(
     template = load_prompt_template(paths["prompt_template"])
     scheduler_config = config.get("scheduler", {})
     retries = int(scheduler_config.get("max_transport_retries", judge_config.get("max_transport_retries", 0)))
-    budget_map = config.get("budget")
+    budget_map = config.get("budget", {})
     cap_val = scheduler_config.get("hard_attempt_cap")
     if cap_val is not None:
         cap = int(cap_val)
+    elif "hard_api_call_cap" in budget_map:
+        cap = int(budget_map["hard_api_call_cap"])
     else:
-        cap = int(require_mapping(budget_map, "budget")["hard_api_call_cap"])
-    counter_path = Path(paths["runs_dir"]) / "api_call_counter.json"
+        cap = 300
+    
+    counter_path = Path(paths.get("attempt_counter", Path(paths["runs_dir"]) / "api_call_counter.json"))
+    budget = AttemptBudget(counter_path, cap, judge_config["model"], sha256_file(config_path))
     
     # Calculate minimum interval from scheduler or max_requests_per_minute
     if "minimum_interval_seconds" in scheduler_config:
@@ -397,7 +428,7 @@ def run_prmbench(
             elapsed = time.monotonic() - last_attempt_at
             if elapsed < minimum_interval:
                 time.sleep(minimum_interval - elapsed)
-            _increment_counter(counter_path, cap)
+            budget.increment()
             last_attempt_at = time.monotonic()
             try:
                 result = provider.judge(
@@ -412,12 +443,11 @@ def run_prmbench(
                 if attempt < retries:
                     retry_after = getattr(exc, "retry_after", None)
                     time.sleep(
-                        float(retry_after) if retry_after else min(2**attempt, 30)
+                        float(retry_after) if retry_after else min(base_backoff_seconds * (2**attempt), 300)
                     )
             except ProviderError as exc:
                 error_status = str(exc)
-                if attempt < retries:
-                    time.sleep(min(2**attempt, 30))
+                break
         base = {
             "run_id": run_id,
             "condition_id": condition_id,

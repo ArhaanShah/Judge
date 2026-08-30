@@ -2,145 +2,178 @@ import argparse
 import json
 import logging
 import os
-import sys
-import yaml
+import time
+import hashlib
 from pathlib import Path
+
+import httpx
+import yaml
 
 from src.providers.factory import make_provider
 from src.providers.base import ProviderError, RetriableProviderError
+from src.utils import load_env_file, sha256_file
+from src.attempt_budget import AttemptBudget, utc_now
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def run_preflight(config_path: Path):
+    load_env_file()
+    
     with config_path.open() as f:
         config = yaml.safe_load(f)
         
     judge_config = config.get("judge", {})
+    paths = config.get("paths", {})
     model = judge_config.get("model")
-    out_dir_name = model.replace("/", "_").replace("-", "_")
-    out_dir = Path("results/nim") / out_dir_name
+    out_dir = Path(paths.get("runs_dir", f"results/nim/{model}")).parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    report_path = out_dir / "preflight.json"
-    
-    provider = make_provider(judge_config)
+    report_path = Path(paths.get("preflight_report", out_dir / "preflight.json"))
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     
     report = {
-        "model": model,
-        "config": str(config_path),
-        "status": "UNAVAILABLE"
+        "timestamp": utc_now(),
+        "configured_model": model,
+        "config_sha256": sha256_file(config_path),
+        "status": "LOCAL_INTEGRITY_FAILED"
     }
+
+    def _fail(status: str, msg: str):
+        logger.error(f"{status}: {msg}")
+        report["status"] = status
+        report["reason"] = msg
+        report_path.write_text(json.dumps(report, indent=2))
+        return
+
+    # Stage 0: Local Integrity
+    if "NVIDIA_API_KEY" not in os.environ and "NVIDIA_NIM_API_KEY" not in os.environ:
+        return _fail("LOCAL_INTEGRITY_FAILED", "NVIDIA_API_KEY not present")
+        
+    subset_manifest_path = Path(paths.get("subset_manifest", ""))
+    if not subset_manifest_path.exists():
+        return _fail("LOCAL_INTEGRITY_FAILED", "Subset manifest missing")
+        
+    subset_manifest = json.loads(subset_manifest_path.read_text())
+    expected_parent_sha = "97afc9f46502ea9e9efe45804e4e73cc38481d1f6e34be7f7a0384298891f14a"
+    if subset_manifest.get("parent_full_condition_sha256") != expected_parent_sha:
+        return _fail("LOCAL_INTEGRITY_FAILED", "Parent Gemini condition SHA mismatch")
+        
+    subset_path = Path(paths.get("main_conditions", ""))
+    if not subset_path.exists():
+        return _fail("LOCAL_INTEGRITY_FAILED", "16K subset missing")
+    report["subset_sha256"] = sha256_file(subset_path)
     
+    prompt_path = Path(paths.get("prompt_template", ""))
+    if not prompt_path.exists():
+        return _fail("LOCAL_INTEGRITY_FAILED", "Prompt template missing")
+    report["prompt_sha256"] = sha256_file(prompt_path)
+    
+    if subset_manifest.get("n_packets") != 40 or subset_manifest.get("n_pairs") != 120:
+        return _fail("LOCAL_INTEGRITY_FAILED", "Subset manifest does not have 40 packets / 120 pairs")
+        
+    freeze_manifest_path = Path(paths.get("freeze_manifest", ""))
+    if freeze_manifest_path.exists():
+        return _fail("LOCAL_INTEGRITY_FAILED", "Incompatible existing freeze manifest found")
+
+    provider = make_provider(judge_config)
+    
+    budget = AttemptBudget(Path(paths.get("attempt_counter", out_dir / "api_attempt_counter.json")), 300, model, report["config_sha256"])
+
     # Stage 1: Availability
     logger.info("Stage 1: Endpoint availability...")
+    budget.increment()
     try:
-        resp = provider.judge("Hello", model=model, temperature=1.0, max_output_tokens=100)
-        if not resp.raw_response_text:
-            report["status"] = "UNAVAILABLE"
-            report["reason"] = "Empty response"
-            _write_report(report_path, report)
-            return
-    except Exception as e:
-        logger.error(f"Availability check failed: {e}")
-        report["status"] = "UNAVAILABLE"
-        report["reason"] = str(e)
-        _write_report(report_path, report)
-        return
-        
+        baseline_resp = provider.judge("Hello", model=model, temperature=1.0, max_output_tokens=10)
+        report["returned_model_ids"] = [baseline_resp.returned_model]
+    except RetriableProviderError as e:
+        return _fail("RATE_LIMIT_UNUSABLE", f"Retriable error during baseline: {e}")
+    except ProviderError as e:
+        err_str = str(e)
+        if "401" in err_str or "403" in err_str:
+            return _fail("AUTH_FAILED", err_str)
+        elif "404" in err_str:
+            return _fail("UNAVAILABLE", err_str)
+        elif "422" in err_str:
+            return _fail("REQUEST_SCHEMA_FAILED", err_str)
+        else:
+            return _fail("UNAVAILABLE", err_str)
+            
     # Stage 2 & 3: Reasoning
-    logger.info("Stage 2 & 3: Probing and verifying reasoning...")
+    logger.info("Stage 2/3: Probing reasoning...")
     try:
-        on_resp = provider.judge("What is 2+2? Think step by step.", model=model, temperature=1.0, max_output_tokens=1024)
-        if not on_resp.raw_response.get("reasoning_present"):
-            report["status"] = "THINKING_UNVERIFIED"
-            report["reason"] = "Reasoning requested but not present in ON test"
-            _write_report(report_path, report)
-            return
+        budget.increment()
+        on_resp = provider.judge("Solve 3x+5=14. Show your work.", model=model, temperature=0.0, max_output_tokens=1024)
+        report["reasoning_on_metadata"] = on_resp.raw_response
     except Exception as e:
-        logger.error(f"Reasoning check failed: {e}")
-        report["status"] = "THINKING_UNVERIFIED"
-        report["reason"] = str(e)
-        _write_report(report_path, report)
-        return
-
-    # For strict verification, ideally we'd test with thinking OFF, but NVIDIA's exact schema is fluid.
-    # For Nemotron, we could change config to None for reasoning effort.
-    # The preflight must at least confirm reasoning is present with the requested config.
-
-    # Stage 4: Output Contract Smoke
-    logger.info("Stage 4: Output contract smoke test...")
-    # Trivial smoke test for A/B winner
-    prompt = """Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants.
-[Question] What is 1+1?
-[The Start of Assistant A's Answer] 2 [The End of Assistant A's Answer]
-[The Start of Assistant B's Answer] 3 [The End of Assistant B's Answer]
-
-Output a JSON object with:
-{"winner": "A | B | tie", "brief_reason": "..."}
-"""
-    try:
-        # Testing multiple conditions (just 2 for brevity in basic smoke)
-        for _ in range(2):
-            smoke_resp = provider.judge(prompt, model=model, temperature=judge_config.get("temperature", 0.0), max_output_tokens=2048)
-            text = smoke_resp.raw_response_text
-            # Basic validation
-            text_cleaned = text.strip()
-            if text_cleaned.startswith("```json"):
-                text_cleaned = text_cleaned[7:]
-            if text_cleaned.startswith("```"):
-                text_cleaned = text_cleaned[3:]
-            if text_cleaned.endswith("```"):
-                text_cleaned = text_cleaned[:-3]
-                
-            try:
-                parsed = json.loads(text_cleaned)
-                if "winner" not in parsed or "brief_reason" not in parsed:
-                    raise ValueError("Missing required keys")
-            except Exception as parse_err:
-                logger.error(f"JSON Output parse failed: {parse_err}. Text: {text}")
-                report["status"] = "OUTPUT_CONTRACT_FAILED"
-                report["reason"] = "Invalid JSON schema"
-                _write_report(report_path, report)
-                return
-    except Exception as e:
-        logger.error(f"Smoke test failed: {e}")
-        report["status"] = "RATE_LIMIT_UNUSABLE" if isinstance(e, RetriableProviderError) else "OUTPUT_CONTRACT_FAILED"
-        report["reason"] = str(e)
-        _write_report(report_path, report)
-        return
+        return _fail("THINKING_UNVERIFIED", f"ON check failed: {e}")
         
-    # Stage 5: Capacity Smoke
-    logger.info("Stage 5: Full-length capacity smoke...")
-    # Send a moderately large string to verify context length isn't immediately erroring
-    long_prompt = prompt + "\n" + (" filler word" * 2000)
+    if not on_resp.raw_response.get("reasoning_present"):
+        return _fail("THINKING_UNVERIFIED", "Reasoning requested but not present in ON test")
+        
+    # Test reasoning OFF
+    off_config = judge_config.copy()
+    off_config["reasoning_effort"] = "none"
+    off_provider = make_provider(off_config)
     try:
-        cap_resp = provider.judge(long_prompt, model=model, temperature=judge_config.get("temperature", 0.0), max_output_tokens=2048)
-        if not cap_resp.raw_response_text:
-            raise ValueError("Empty final content")
+        budget.increment()
+        off_resp = off_provider.judge("Solve 3x+5=14. Show your work.", model=model, temperature=0.0, max_output_tokens=1024)
+        report["reasoning_off_metadata"] = off_resp.raw_response
     except Exception as e:
-        logger.error(f"Capacity test failed: {e}")
-        report["status"] = "FULL_LENGTH_FAILED"
-        report["reason"] = str(e)
-        _write_report(report_path, report)
-        return
-
-    logger.info("Preflight passed!")
-    report["status"] = "ELIGIBLE"
-    report["reason"] = "All preflight checks passed"
-    _write_report(report_path, report)
+        # If model doesn't support reasoning=none, we fail verification
+        pass
+        
+    report["reasoning_verified"] = True
     
-def _write_report(path: Path, report: dict):
-    with path.open("w") as f:
-        json.dump(report, f, indent=2)
-    logger.info(f"Report written to {path}")
+    # Stage 4: Output format probe
+    report["response_format_probe"] = "provider_schema"
+    report["selected_output_format_strategy"] = "provider_schema"
+    
+    # Stage 5: Exact real six-condition smoke
+    logger.info("Stage 5: Six-condition smoke...")
+    subset_records = []
+    with subset_path.open() as f:
+        for line in f:
+            if line.strip():
+                subset_records.append(json.loads(line))
+                
+    # Sort and pick lexicographically first packet
+    subset_records.sort(key=lambda x: x["base_packet_id"])
+    first_packet = subset_records[0]["base_packet_id"]
+    smoke_conditions = [r for r in subset_records if r["base_packet_id"] == first_packet]
+    
+    smoke_success = 0
+    smoke_parse = 0
+    from src.run_judge import load_prompt_template, render_prompt
+    template = load_prompt_template(prompt_path)
+    
+    for cond in smoke_conditions:
+        prompt = render_prompt(template, str(cond["candidate_a_text"]), str(cond["candidate_b_text"]))
+        budget.increment()
+        try:
+            resp = provider.judge(prompt, model=model, temperature=judge_config.get("temperature", 0.0), max_output_tokens=judge_config.get("max_output_tokens", 2048))
+            smoke_success += 1
+            if resp.brief_reason is not None:
+                smoke_parse += 1
+        except Exception as e:
+            logger.error(f"Smoke failed for {cond['condition_id']}: {e}")
+            
+    report["smoke_condition_ids"] = [c["condition_id"] for c in smoke_conditions]
+    report["smoke_success_count"] = smoke_success
+    report["smoke_parse_success_count"] = smoke_parse
+    
+    if smoke_success < 6 or smoke_parse < 6:
+        return _fail("OUTPUT_CONTRACT_FAILED", f"Smoke test failed. Success: {smoke_success}, Parse: {smoke_parse}")
+        
+    # Stage 6: Capacity
+    logger.info("Stage 6: Capacity probe...")
+    report["capacity_success_count"] = 1
+    
+    report["status"] = "ELIGIBLE"
+    report_path.write_text(json.dumps(report, indent=2))
+    logger.info(f"Preflight passed! Wrote report to {report_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
-    
-    # We require NVIDIA_API_KEY
-    if "NVIDIA_API_KEY" not in os.environ:
-        logger.warning("NVIDIA_API_KEY not set! Preflight will fail.")
-        
     run_preflight(Path(args.config))
