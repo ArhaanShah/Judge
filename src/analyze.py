@@ -34,6 +34,14 @@ class PilotMetrics:
     late_cer: float | None
     edge_cer: float | None
     delta_cer: float | None
+    early_post_filter_accuracy: float | None = None
+    middle_post_filter_accuracy: float | None = None
+    late_post_filter_accuracy: float | None = None
+    edge_post_filter_accuracy: float | None = None
+    early_reported_gap: float | None = None
+    middle_reported_gap: float | None = None
+    late_reported_gap: float | None = None
+    edge_reported_gap: float | None = None
     delta_acc_clean_first: float | None = None
     delta_acc_flawed_first: float | None = None
 
@@ -49,6 +57,17 @@ def _mean(values: Iterable[bool | float]) -> float | None:
 
 def _subtract(left: float | None, right: float | None) -> float | None:
     return left - right if left is not None and right is not None else None
+
+
+def _model_name(manifest: dict[str, Any], parsed: list[dict[str, Any]]) -> str:
+    return next(
+        (
+            str(row.get("returned_model"))
+            for row in parsed
+            if row.get("returned_model")
+        ),
+        str(manifest.get("model") or "unknown"),
+    )
 
 
 def accuracy(rows: Iterable[dict[str, Any]]) -> float | None:
@@ -74,6 +93,36 @@ def consistent_error_rate(rows: Iterable[dict[str, Any]]) -> float | None:
         if row.get("parse_ok") and row.get("swap_consistent") is True
     ]
     return _mean(bool(row["consistent_wrong"]) for row in consistent)
+
+
+def post_filter_accuracy(rows: Iterable[dict[str, Any]]) -> float | None:
+    """Accuracy restricted to swap-consistent pairs (1 - CER).
+
+    Returns None when no swap-consistent pairs exist (coverage = 0).
+    Among swap-consistent pairs, ``consistent_wrong`` is False iff the
+    consistent winner is the ground-truth clean/correct candidate.
+    """
+    consistent = [
+        row
+        for row in rows
+        if row.get("parse_ok") and row.get("swap_consistent") is True
+    ]
+    if not consistent:
+        return None
+    return _mean(row.get("consistent_wrong") is False for row in consistent)
+
+
+def reported_gap(
+    raw_accuracy: float | None,
+    post_filter: float | None,
+) -> float | None:
+    """Difference between post-filter and raw accuracy.
+
+    Returns None when either input is None (e.g., zero coverage).
+    """
+    if raw_accuracy is None or post_filter is None:
+        return None
+    return post_filter - raw_accuracy
 
 
 def compute_pilot_metrics(
@@ -111,11 +160,16 @@ def compute_pilot_metrics(
         position: consistent_error_rate(pair_by_position[position])
         for position in POSITIONS
     }
+    post_filters = {
+        position: post_filter_accuracy(pair_by_position[position])
+        for position in POSITIONS
+    }
     edge_calls = call_by_position["early"] + call_by_position["late"]
     edge_pairs = pair_by_position["early"] + pair_by_position["late"]
     edge_accuracy = accuracy(edge_calls)
     edge_sc = swap_consistency(edge_pairs)
     edge_cer = consistent_error_rate(edge_pairs)
+    edge_post_filter = post_filter_accuracy(edge_pairs)
     order_deltas: dict[str, float | None] = {}
     first_order = "clean_first" if any(row.get("candidate_order") == "clean_first" for row in parsed) else "correct_first"
     for order in (first_order, "flawed_first"):
@@ -138,6 +192,14 @@ def compute_pilot_metrics(
         late_cer=cers["late"],
         edge_cer=edge_cer,
         delta_cer=_subtract(cers["middle"], edge_cer),
+        early_post_filter_accuracy=post_filters["early"],
+        middle_post_filter_accuracy=post_filters["middle"],
+        late_post_filter_accuracy=post_filters["late"],
+        edge_post_filter_accuracy=edge_post_filter,
+        early_reported_gap=reported_gap(accuracies["early"], post_filters["early"]),
+        middle_reported_gap=reported_gap(accuracies["middle"], post_filters["middle"]),
+        late_reported_gap=reported_gap(accuracies["late"], post_filters["late"]),
+        edge_reported_gap=reported_gap(edge_accuracy, edge_post_filter),
         delta_acc_clean_first=order_deltas[first_order],
         delta_acc_flawed_first=order_deltas["flawed_first"],
     )
@@ -220,8 +282,19 @@ def metric_snapshot(
             snapshot[f"swap_consistency.{context}.{position}"] = (
                 swap_consistency(pair_rows)
             )
+            snapshot[f"coverage.{context}.{position}"] = (
+                swap_consistency(pair_rows)
+            )
             snapshot[f"cer.{context}.{position}"] = (
                 consistent_error_rate(pair_rows)
+            )
+            snapshot[f"post_filter_accuracy.{context}.{position}"] = (
+                post_filter_accuracy(pair_rows)
+            )
+            cell_raw = accuracy(call_rows)
+            cell_post = post_filter_accuracy(pair_rows)
+            snapshot[f"reported_gap.{context}.{position}"] = (
+                reported_gap(cell_raw, cell_post)
             )
             first_order = "clean_first" if any(row.get("candidate_order") == "clean_first" for row in call_rows) else "correct_first"
             for order in (first_order, "flawed_first"):
@@ -437,9 +510,15 @@ def grouped_summaries(
                     "n_parsed": sum(
                         bool(row.get("parse_ok")) for row in position_pairs
                     ),
+                    "coverage": swap_consistency(position_pairs),
                     "swap_consistency": swap_consistency(position_pairs),
+                    "post_filter_accuracy": post_filter_accuracy(position_pairs),
                     "cer": consistent_error_rate(position_pairs),
                     "fcr": consistent_error_rate(position_pairs),
+                    "reported_gap": reported_gap(
+                        accuracy(position_calls),
+                        post_filter_accuracy(position_pairs),
+                    ),
                 }
             )
     def call_group(
@@ -630,15 +709,32 @@ def write_required_outputs(
     snapshot: dict[str, float | None],
     intervals: dict[str, dict[str, float | int] | None],
     decision: dict[str, Any],
+    *,
+    model: str,
+    pilot_context: str,
 ) -> None:
     results_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
+
     for context in sorted({str(row["context_length"]) for row in parsed}):
         for position in POSITIONS:
             calls = [row for row in parsed if row["context_length"] == context and row["internal_position"] == position]
             pair_rows = [row for row in pairs if row["context_length"] == context and row["internal_position"] == position]
-            keys = {"raw_accuracy": f"accuracy.{context}.{position}", "swap_consistency": f"swap_consistency.{context}.{position}", "consistent_error_rate": f"cer.{context}.{position}"}
-            output: dict[str, Any] = {"length": context, "position": position, "n_calls": len(calls), "n_swap_pairs": len(pair_rows)}
+            keys = {
+                "raw_accuracy": f"accuracy.{context}.{position}",
+                "post_filter_accuracy": f"post_filter_accuracy.{context}.{position}",
+                "coverage": f"coverage.{context}.{position}",
+                "swap_consistency": f"swap_consistency.{context}.{position}",
+                "consistent_error_rate": f"cer.{context}.{position}",
+                "reported_gap": f"reported_gap.{context}.{position}",
+            }
+            output: dict[str, Any] = {
+                "model": model,
+                "length": context,
+                "position": position,
+                "n_calls": len(calls),
+                "n_swap_pairs": len(pair_rows)
+            }
             for column, key in keys.items():
                 output[column] = snapshot.get(key)
                 interval = intervals.get(key) or {}
@@ -646,13 +742,28 @@ def write_required_outputs(
                 output[f"{prefix}_ci_low"] = interval.get("low")
                 output[f"{prefix}_ci_high"] = interval.get("high")
             rows.append(output)
-    columns = ["length", "position", "n_calls", "n_swap_pairs", "raw_accuracy", "swap_consistency", "consistent_error_rate", "raw_accuracy_ci_low", "raw_accuracy_ci_high", "swap_consistency_ci_low", "swap_consistency_ci_high", "cer_ci_low", "cer_ci_high"]
+            
+    columns = [
+        "model", "length", "position", "n_calls", "n_swap_pairs",
+        "raw_accuracy", "raw_accuracy_ci_low", "raw_accuracy_ci_high",
+        "post_filter_accuracy", "post_filter_accuracy_ci_low", "post_filter_accuracy_ci_high",
+        "coverage", "coverage_ci_low", "coverage_ci_high",
+        "swap_consistency", "swap_consistency_ci_low", "swap_consistency_ci_high",
+        "consistent_error_rate", "cer_ci_low", "cer_ci_high",
+        "reported_gap", "reported_gap_ci_low", "reported_gap_ci_high"
+    ]
     with (results_dir / "pilot_summary.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         writer.writerows(rows)
     markdown = ["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"]
     markdown.extend("| " + " | ".join("" if row.get(column) is None else str(row.get(column)) for column in columns) + " |" for row in rows)
+
+    hard_coverage = snapshot.get(f"coverage.{pilot_context}.middle")
+    hard_coverage_str = f"{hard_coverage:.2%}" if hard_coverage is not None else "undefined"
+    markdown.append("")
+    markdown.append(f"**Effective hard-distribution coverage ({pilot_context} middle, {model}):** {hard_coverage_str}")
+
     (results_dir / "pilot_summary.md").write_text("\n".join(markdown) + "\n", encoding="utf-8")
     checks, values, thresholds = decision["checks"], decision["values"], decision["thresholds"]
     criteria = {
@@ -714,6 +825,58 @@ def analyze_run(run_dir: str | Path) -> dict[str, Any]:
         bool(integrity["passed"]),
     )
     summaries = grouped_summaries(parsed, pairs)
+    
+    model = _model_name(manifest, parsed)
+    gradient = []
+    for context in ["4K", "16K"]:
+        if context not in {str(row["context_length"]) for row in parsed}:
+            continue
+        for position in POSITIONS:
+            gradient.append({
+                "model": model,
+                "context_length": context,
+                "internal_position": position,
+                "coverage": snapshot.get(f"coverage.{context}.{position}"),
+                "coverage_ci_low": intervals.get(f"coverage.{context}.{position}", {}).get("low") if intervals.get(f"coverage.{context}.{position}") else None,
+                "coverage_ci_high": intervals.get(f"coverage.{context}.{position}", {}).get("high") if intervals.get(f"coverage.{context}.{position}") else None,
+                "raw_accuracy": snapshot.get(f"accuracy.{context}.{position}"),
+                "post_filter_accuracy": snapshot.get(f"post_filter_accuracy.{context}.{position}"),
+                "reported_gap": snapshot.get(f"reported_gap.{context}.{position}"),
+            })
+            
+    def _cov(ctx: str, pos: str) -> float | None:
+        return snapshot.get(f"coverage.{ctx}.{pos}")
+        
+    def _edge_cov(ctx: str) -> float | None:
+        return swap_consistency(
+            row
+            for row in pairs
+            if row["context_length"] == ctx
+            and row["internal_position"] in ("early", "late")
+        )
+        
+    diagnostics = {}
+    if "4K" in {str(row["context_length"]) for row in parsed} and "16K" in {str(row["context_length"]) for row in parsed}:
+        diagnostics = {
+            "coverage_drop_4k_edge_to_4k_middle": _subtract(_edge_cov("4K"), _cov("4K", "middle")),
+            "coverage_drop_16k_edge_to_16k_middle": _subtract(_edge_cov("16K"), _cov("16K", "middle")),
+            "coverage_drop_early_4k_to_16k": _subtract(_cov("4K", "early"), _cov("16K", "early")),
+            "coverage_drop_middle_4k_to_16k": _subtract(_cov("4K", "middle"), _cov("16K", "middle")),
+            "coverage_drop_late_4k_to_16k": _subtract(_cov("4K", "late"), _cov("16K", "late")),
+        }
+        
+        mid_lower = all(
+            _cov(ctx, "middle") is not None and _cov(ctx, pos) is not None and _cov(ctx, "middle") < _cov(ctx, pos)
+            for ctx in ("4K", "16K") for pos in ("early", "late")
+        )
+        len_lower = all(
+            _cov("16K", pos) is not None and _cov("4K", pos) is not None and _cov("16K", pos) < _cov("4K", pos)
+            for pos in POSITIONS
+        )
+        
+        diagnostics["middle_lower_than_edges_within_each_length"] = mid_lower
+        diagnostics["coverage_lower_at_16k_than_4k_within_each_position"] = len_lower
+
     metrics = {
         "pilot_context_length": pilot_context,
         "pilot": asdict(pilot_metrics),
@@ -726,6 +889,9 @@ def analyze_run(run_dir: str | Path) -> dict[str, Any]:
             "intervals": intervals,
         },
         "integrity": integrity,
+        "coverage_difficulty_gradient": gradient,
+        "effective_hard_distribution_coverage": snapshot.get(f"coverage.{pilot_context}.middle"),
+        "coverage_diagnostics": diagnostics,
     }
     if "4K" in {str(row["context_length"]) for row in parsed} and pilot_context == "16K":
         short_metrics = compute_pilot_metrics(parsed, pairs, "4K")
@@ -745,7 +911,16 @@ def analyze_run(run_dir: str | Path) -> dict[str, Any]:
     output_dir = Path(config["paths"].get("results_dir", run_dir)) if "source_rows" in config["paths"] else run_dir
     generate_figures(output_dir, snapshot, intervals, contexts, pilot_context)
     if "source_rows" in config["paths"]:
-        write_required_outputs(output_dir, parsed, pairs, snapshot, intervals, decision)
+        write_required_outputs(
+            output_dir,
+            parsed,
+            pairs,
+            snapshot,
+            intervals,
+            decision,
+            model=model,
+            pilot_context=pilot_context,
+        )
     print("DATA INTEGRITY")
     for name, passed in integrity["checks"].items():
         print(f"[{'PASS' if passed else 'FAIL'}] {name}")

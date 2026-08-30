@@ -25,6 +25,11 @@ def make_provider(judge_config: dict[str, Any]) -> JudgeProvider:
         return GeminiJudgeProvider(
             timeout_seconds=float(judge_config.get("timeout_seconds", 120))
         )
+    if name == "groq":
+        from .groq_provider import GroqJudgeProvider
+        return GroqJudgeProvider(
+            timeout_seconds=float(judge_config.get("timeout_seconds", 120))
+        )
     if name in ("nvidia_nim", "nim", "nvidia"):
         from .nvidia_nim_provider import NvidiaNimProvider
         return NvidiaNimProvider(

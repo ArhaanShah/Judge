@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from src.analyze import analyze_run
 from src.utils import write_json, write_jsonl
@@ -44,7 +45,26 @@ def test_prmbench_analysis_writes_required_outputs_offline(tmp_path: Path) -> No
     write_json(run_dir / "manifest.json", {"split": "main", "config": config})
     result = analyze_run(run_dir)
     assert result["decision"]["decision"] == "KILL"  # intentionally incomplete: integrity fails closed
-    assert (results_dir / "pilot_summary.csv").exists()
-    assert (results_dir / "pilot_summary.md").exists()
+    
+    csv_text = (results_dir / "pilot_summary.csv").read_text(encoding="utf-8")
+    assert "coverage" in csv_text
+    assert "swap_consistency" in csv_text
+    assert "post_filter_accuracy" in csv_text
+    assert "reported_gap" in csv_text
+    
+    md_text = (results_dir / "pilot_summary.md").read_text(encoding="utf-8")
+    assert "coverage" in md_text
+    assert "swap_consistency" in md_text
+    assert "Effective hard-distribution coverage" in md_text
+
+    metrics = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert len(metrics["coverage_difficulty_gradient"]) == 6
+    assert metrics["effective_hard_distribution_coverage"] == 1.0
+    assert "coverage_drop_16k_edge_to_16k_middle" in metrics["coverage_diagnostics"]
+    stratified_pairs = metrics["stratified"]["pair_level_by_context_and_position"]
+    assert all("coverage" in row for row in stratified_pairs)
+    assert all("post_filter_accuracy" in row for row in stratified_pairs)
+    assert all("reported_gap" in row for row in stratified_pairs)
+    
     assert (results_dir / "go_kill.json").exists()
     assert len(list((results_dir / "figures").glob("*.png"))) == 5
