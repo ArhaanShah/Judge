@@ -1,0 +1,72 @@
+{
+  "conditions_hash": "9d64d695c2f0c0aa304becda482b3a160a2276a4f1489877ea64fe53a1890822",
+  "config": {
+    "experiment_name": "nim_nemotron3super_robustness",
+    "judge": {
+      "max_tokens": 32768,
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "provider": "nvidia_nim",
+      "reasoning_budget": 16384,
+      "reasoning_effort": "high",
+      "stream": true,
+      "temperature": 1.0,
+      "top_p": 0.95
+    },
+    "lengths": {
+      "16K": {
+        "max": 16800,
+        "min": 15200,
+        "target": 16000
+      }
+    },
+    "paths": {
+      "attempt_counter": "results/nim/nemotron3super/api_attempt_counter.json",
+      "freeze_manifest": "artifacts/nim_nemotron3super_freeze_manifest.json",
+      "main_conditions": "data/processed/pilot_conditions_16k.jsonl",
+      "main_validation_report": "data/processed/main_validation_report_nim_nemotron3super.json",
+      "preflight_report": "results/nim/nemotron3super/preflight.json",
+      "prompt_template": "config/prompts/pairwise_judge.txt",
+      "results_dir": "results/nim/nemotron3super/paper",
+      "runs_dir": "results/nim/nemotron3super/raw",
+      "source_manifest": "data/source/prmbench_manifest.json",
+      "source_rows": "data/source/prmbench_rows.jsonl",
+      "subset_manifest": "artifacts/nim_16k_subset_manifest.json"
+    },
+    "positions": {
+      "early": {
+        "max": 0.2,
+        "min": 0.1,
+        "target": 0.15
+      },
+      "late": {
+        "max": 0.9,
+        "min": 0.8,
+        "target": 0.85
+      },
+      "middle": {
+        "max": 0.55,
+        "min": 0.45,
+        "target": 0.5
+      }
+    },
+    "scheduler": {
+      "base_backoff_seconds": 120,
+      "hard_attempt_cap": 300,
+      "max_concurrency": 1,
+      "max_transport_retries": 2,
+      "minimum_interval_seconds": 60
+    },
+    "seed": 20260828,
+    "tokenizer": "CohereLabs/command-a-plus-05-2026-w4a4"
+  },
+  "config_sha256": "01c81bf0ffe207405035d5d7f1454c717cf77b37b65fdbab47d867df6a75064e",
+  "created_at": "2026-08-30T02:46:39.905899+00:00",
+  "freeze_manifest_sha256": "14739b5554298487626582459347b26b8410f81291cc8d1b0380e51a48060231",
+  "git_commit": "4ecce999c3965eedf0c16fd10ce0931217d52137",
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "prompt_sha256": "772bef38a1a9922e31432d8a7e516f7a18a1e9d26185b254500f0505e9cc1004",
+  "provider": "nvidia_nim",
+  "run_id": "main_20260830T024637Z",
+  "split": "main",
+  "subset_sha256": "9d64d695c2f0c0aa304becda482b3a160a2276a4f1489877ea64fe53a1890822"
+}

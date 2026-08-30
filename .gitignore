@@ -40,7 +40,4 @@ results/figures/*.png
 results/raw/api_call_counter.json
 results/gemini/raw
 results/groq/raw
-results/nim/*/raw/
-results/nim/*/api_attempt_counter.json
-results/nim/nemotron3super/raw/
 results/nim/*/api_attempt_counter.json
