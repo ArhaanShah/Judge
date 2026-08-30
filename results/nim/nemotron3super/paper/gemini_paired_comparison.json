@@ -1,0 +1,20 @@
+{
+  "certification_coverage_middle_penalty_diff": {
+    "high": 0.30093940331176255,
+    "low": -0.06136363636363634,
+    "mean": 0.12402656950923019,
+    "n": 10000
+  },
+  "position_consistency_middle_penalty_diff": {
+    "high": 0.09553052317112151,
+    "low": -0.451300955988456,
+    "mean": -0.1751146207409585,
+    "n": 10000
+  },
+  "raw_accuracy_middle_penalty_diff": {
+    "high": 0.3204289167753323,
+    "low": 0.047860340168262586,
+    "mean": 0.19148542958139883,
+    "n": 10000
+  }
+}

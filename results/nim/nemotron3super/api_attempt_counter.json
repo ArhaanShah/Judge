@@ -1,6 +1,6 @@
 {
-  "api_attempts": 18,
+  "api_attempts": 270,
   "model": "nvidia/nemotron-3-super-120b-a12b",
   "config_sha256": "01c81bf0ffe207405035d5d7f1454c717cf77b37b65fdbab47d867df6a75064e",
-  "updated_at": "2026-08-30T02:44:32.915728+00:00"
+  "updated_at": "2026-08-30T08:02:08.015952+00:00"
 }

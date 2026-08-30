@@ -1,0 +1,11 @@
+{
+  "n_calls": 240,
+  "n_pairs": 120,
+  "overall_parse_success": 0.9333333333333333,
+  "passed_inclusion_gate": false,
+  "per_position_parse": {
+    "early": 0.8875,
+    "late": 0.9625,
+    "middle": 0.95
+  }
+}

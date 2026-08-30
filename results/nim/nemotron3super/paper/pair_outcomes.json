@@ -1,0 +1,98 @@
+{
+  "cells": {
+    "16K.early": {
+      "certification_coverage": 0.5806451612903226,
+      "certified_correct": 18,
+      "certified_correct_fraction": 0.5806451612903226,
+      "certified_wrong": 0,
+      "certified_wrong_fraction": 0.0,
+      "mixed_tie": 5,
+      "mixed_tie_fraction": 0.16129032258064516,
+      "n_calls": 71,
+      "n_certified": 18,
+      "n_certified_correct": 18,
+      "n_certified_wrong": 0,
+      "n_pairs": 31,
+      "order_disagreement": 0,
+      "order_disagreement_fraction": 0.0,
+      "position_consistency": 0.8387096774193549,
+      "pure_order_disagreement_fraction": 0.0,
+      "raw_accuracy": 0.6338028169014085,
+      "rejection_rate": 0.4193548387096774,
+      "selective_risk": 0.0,
+      "selective_risk_exact_ci": [
+        0.0,
+        0.1853019681378522
+      ],
+      "stable_tie": 8,
+      "stable_tie_fraction": 0.25806451612903225,
+      "tie_involved_fraction": 0.41935483870967744,
+      "tie_share_of_noncertification": 1.0
+    },
+    "16K.late": {
+      "certification_coverage": 0.4864864864864865,
+      "certified_correct": 18,
+      "certified_correct_fraction": 0.4864864864864865,
+      "certified_wrong": 0,
+      "certified_wrong_fraction": 0.0,
+      "mixed_tie": 7,
+      "mixed_tie_fraction": 0.1891891891891892,
+      "n_calls": 77,
+      "n_certified": 18,
+      "n_certified_correct": 18,
+      "n_certified_wrong": 0,
+      "n_pairs": 37,
+      "order_disagreement": 0,
+      "order_disagreement_fraction": 0.0,
+      "position_consistency": 0.8108108108108109,
+      "pure_order_disagreement_fraction": 0.0,
+      "raw_accuracy": 0.5844155844155844,
+      "rejection_rate": 0.5135135135135135,
+      "selective_risk": 0.0,
+      "selective_risk_exact_ci": [
+        0.0,
+        0.1853019681378522
+      ],
+      "stable_tie": 12,
+      "stable_tie_fraction": 0.32432432432432434,
+      "tie_involved_fraction": 0.5135135135135135,
+      "tie_share_of_noncertification": 1.0
+    },
+    "16K.middle": {
+      "certification_coverage": 0.5277777777777778,
+      "certified_correct": 19,
+      "certified_correct_fraction": 0.5277777777777778,
+      "certified_wrong": 0,
+      "certified_wrong_fraction": 0.0,
+      "mixed_tie": 10,
+      "mixed_tie_fraction": 0.2777777777777778,
+      "n_calls": 76,
+      "n_certified": 19,
+      "n_certified_correct": 19,
+      "n_certified_wrong": 0,
+      "n_pairs": 36,
+      "order_disagreement": 0,
+      "order_disagreement_fraction": 0.0,
+      "position_consistency": 0.7222222222222222,
+      "pure_order_disagreement_fraction": 0.0,
+      "raw_accuracy": 0.618421052631579,
+      "rejection_rate": 0.4722222222222222,
+      "selective_risk": 0.0,
+      "selective_risk_exact_ci": [
+        0.0,
+        0.17646691180696533
+      ],
+      "stable_tie": 7,
+      "stable_tie_fraction": 0.19444444444444445,
+      "tie_involved_fraction": 0.4722222222222222,
+      "tie_share_of_noncertification": 1.0
+    }
+  },
+  "partition": [
+    "certified_correct",
+    "certified_wrong",
+    "stable_tie",
+    "mixed_tie",
+    "order_disagreement"
+  ]
+}
