@@ -33,6 +33,12 @@ hand-authors or edits their errors. The older generic `configs/pilot.yaml`
 path remains available for offline development and backwards-compatible mock
 tests; it is not the preregistered pilot.
 
+## Gemini paper reanalysis and NIM robustness workflow
+
+Gemini is primary paper evidence.
+NIM is post-hoc robustness only.
+Cohere and Groq are not paper-facing robustness evidence.
+
 ## PRMBench/Cohere pilot workflow
 
 Install the pilot dependencies:
@@ -107,6 +113,8 @@ of them. Modular sections should be self-contained enough that the fixed judge
 prompt supplies all information needed to compare the responses.
 
 ## Metrics and decision rule
+
+Note: In the new Gemini paper reanalysis, legacy swap_consistent is NOT standard position consistency. Decisive certification coverage is used for paper coverage.
 
 - Raw accuracy is the fraction of successfully parsed calls selecting the
   correct candidate.
