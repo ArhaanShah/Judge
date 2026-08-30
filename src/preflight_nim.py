@@ -107,7 +107,7 @@ def run_preflight(config_path: Path):
     except Exception as e:
         return _fail("THINKING_UNVERIFIED", f"ON check failed: {e}")
         
-    if not on_resp.raw_response.get("reasoning_present"):
+    if judge_config.get("reasoning_effort") in ("high", "low") and not on_resp.raw_response.get("reasoning_present"):
         return _fail("THINKING_UNVERIFIED", "Reasoning requested but not present in ON test")
         
     # Test reasoning OFF
@@ -118,9 +118,10 @@ def run_preflight(config_path: Path):
         budget.increment()
         off_resp = off_provider.judge("Solve 3x+5=14. Show your work.", model=model, temperature=0.0, max_output_tokens=1024)
         report["reasoning_off_metadata"] = off_resp.raw_response
+        if off_resp.raw_response.get("reasoning_present"):
+            return _fail("THINKING_UNVERIFIED", "Reasoning was not successfully suppressed in OFF test")
     except Exception as e:
-        # If model doesn't support reasoning=none, we fail verification
-        pass
+        return _fail("THINKING_UNVERIFIED", f"OFF check failed: {e}")
         
     report["reasoning_verified"] = True
     
@@ -150,10 +151,21 @@ def run_preflight(config_path: Path):
         prompt = render_prompt(template, str(cond["candidate_a_text"]), str(cond["candidate_b_text"]))
         budget.increment()
         try:
-            resp = provider.judge(prompt, model=model, temperature=judge_config.get("temperature", 0.0), max_output_tokens=judge_config.get("max_output_tokens", 2048))
+            resp = provider.judge(prompt, model=model, temperature=judge_config.get("temperature", 0.0), max_output_tokens=int(judge_config.get("max_tokens", judge_config.get("max_output_tokens", 2048))))
             smoke_success += 1
             if resp.brief_reason is not None:
-                smoke_parse += 1
+                try:
+                    text = resp.raw_response_text.strip()
+                    if text.startswith("```json"): text = text[7:]
+                    elif text.startswith("```"): text = text[3:]
+                    if text.endswith("```"): text = text[:-3]
+                    parsed = json.loads(text.strip())
+                    if parsed.get("winner") in ("A", "B", "tie"):
+                        smoke_parse += 1
+                    else:
+                        logger.error(f"Missing winner field. Raw: {text}")
+                except Exception as e:
+                    logger.error(f"JSON decode failed: {e}. Raw: {resp.raw_response_text}")
         except Exception as e:
             logger.error(f"Smoke failed for {cond['condition_id']}: {e}")
             

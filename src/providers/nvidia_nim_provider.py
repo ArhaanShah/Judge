@@ -46,6 +46,10 @@ class NvidiaNimProvider(JudgeProvider):
         temperature: float,
         max_output_tokens: int,
     ) -> JudgeResponse:
+        suffix = '\n\nOutput your response in JSON format. Require winner \u2208 {"A", "B", "tie"} AND brief_reason string.'
+        if "Output your response in JSON format." not in prompt:
+            prompt += suffix
+
         
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -71,6 +75,9 @@ class NvidiaNimProvider(JudgeProvider):
             payload["reasoning_budget"] = self.profile.reasoning_budget
         if self.profile.response_format is not None:
             payload["response_format"] = self.profile.response_format
+        else:
+            payload["response_format"] = {"type": "json_object"}
+
             
         if self.profile.extra_body:
             payload.update(self.profile.extra_body)

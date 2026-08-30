@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-08-30T02:43:11.830301+00:00",
+  "configured_model": "nvidia/nemotron-3-super-120b-a12b",
+  "config_sha256": "01c81bf0ffe207405035d5d7f1454c717cf77b37b65fdbab47d867df6a75064e",
+  "status": "ELIGIBLE",
+  "subset_sha256": "9d64d695c2f0c0aa304becda482b3a160a2276a4f1489877ea64fe53a1890822",
+  "prompt_sha256": "772bef38a1a9922e31432d8a7e516f7a18a1e9d26185b254500f0505e9cc1004",
+  "returned_model_ids": [
+    "nvidia/nemotron-3-super-120b-a12b"
+  ],
+  "reasoning_on_metadata": {
+    "reasoning_present": true,
+    "reasoning_character_count": 1055,
+    "reasoning_sha256": "431e608c1aa2c564c97627237ee81d63f8e6dfb9d438a8cd38ce3b0acab5d151",
+    "reasoning_tokens_if_reported": null,
+    "finish_reason": "stop",
+    "usage": {}
+  },
+  "reasoning_off_metadata": {
+    "reasoning_present": false,
+    "reasoning_character_count": 0,
+    "reasoning_sha256": null,
+    "reasoning_tokens_if_reported": null,
+    "finish_reason": "stop",
+    "usage": {}
+  },
+  "reasoning_verified": true,
+  "response_format_probe": "provider_schema",
+  "selected_output_format_strategy": "provider_schema",
+  "smoke_condition_ids": [
+    "main_001__16K__early__clean_first",
+    "main_001__16K__early__flawed_first",
+    "main_001__16K__middle__clean_first",
+    "main_001__16K__middle__flawed_first",
+    "main_001__16K__late__clean_first",
+    "main_001__16K__late__flawed_first"
+  ],
+  "smoke_success_count": 6,
+  "smoke_parse_success_count": 6,
+  "capacity_success_count": 1
+}

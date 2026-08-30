@@ -145,7 +145,7 @@ def run(config_path: str | Path, run_id: str) -> Path:
                     "provider": judge_config["provider"],
                     "model": judge_config["model"],
                     "temperature": judge_config["temperature"],
-                    "max_output_tokens": judge_config["max_output_tokens"],
+                    "max_output_tokens": judge_config.get("max_tokens", judge_config.get("max_output_tokens", 2048)),
                     "prompt": prompt,
                 },
             )
@@ -161,7 +161,7 @@ def run(config_path: str | Path, run_id: str) -> Path:
                     prompt,
                     model=str(judge_config["model"]),
                     temperature=float(judge_config["temperature"]),
-                    max_output_tokens=int(judge_config["max_output_tokens"]),
+                    max_output_tokens=int(judge_config.get("max_tokens", judge_config.get("max_output_tokens", 2048))),
                 )
                 break
             except RetriableProviderError as exc:
@@ -210,8 +210,19 @@ def provider_preflight(
 ) -> None:
     load_env_file()
     judge = require_mapping(config.get("judge"), "judge")
-    budget = require_mapping(config.get("budget"), "budget")
     provider = str(judge["provider"]).lower()
+    
+    is_nim = config.get("experiment_name", "").startswith("nim") or provider in ("nvidia_nim", "nim", "nvidia")
+    
+    if is_nim:
+        scheduler = require_mapping(config.get("scheduler"), "scheduler")
+        hard_cap = int(scheduler.get("hard_attempt_cap", 300))
+        required = 0 # No legacy free budget requirement for NIM
+    else:
+        budget = require_mapping(config.get("budget"), "budget")
+        required = int(budget["required_available_calls"])
+        hard_cap = int(budget["hard_api_call_cap"])
+
     env_var_map = {
         "cohere": "COHERE_API_KEY",
         "gemini": "GEMINI_API_KEY",
@@ -223,7 +234,6 @@ def provider_preflight(
         "nvidia": "NVIDIA_API_KEY",
     }
     env_var = env_var_map.get(provider, f"{provider.upper()}_API_KEY")
-    required = int(budget["required_available_calls"])
     key_present = bool(os.environ.get(env_var)) or (
         provider in ("gemini", "google") and bool(os.environ.get("GOOGLE_API_KEY"))
     )
@@ -236,12 +246,12 @@ def provider_preflight(
     print(
         f"monthly call budget entered by operator: {available_call_budget if available_call_budget is not None else 'not entered'}"
     )
-    print(f"planned maximum calls: {int(budget['hard_api_call_cap'])}")
+    print(f"planned maximum calls: {hard_cap}")
     if not key_present:
         raise RuntimeError(f"{env_var} is not present")
     if not trial_confirmed:
         raise RuntimeError("operator must explicitly confirm trial/evaluation mode")
-    if available_call_budget is None or available_call_budget < required:
+    if not is_nim and (available_call_budget is None or available_call_budget < required):
         raise RuntimeError(f"available free call budget must be at least {required}")
 
 
@@ -435,7 +445,7 @@ def run_prmbench(
                     prompt,
                     model=str(judge_config["model"]),
                     temperature=float(judge_config["temperature"]),
-                    max_output_tokens=int(judge_config["max_output_tokens"]),
+                    max_output_tokens=int(judge_config.get("max_tokens", judge_config.get("max_output_tokens", 2048))),
                 )
                 break
             except RetriableProviderError as exc:
